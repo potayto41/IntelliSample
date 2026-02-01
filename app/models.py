@@ -1,8 +1,8 @@
 """
-Site catalog model. SQLite-compatible; all new enrichment fields are nullable.
-Legacy columns (platform, industry, tags) stay for display and backward compatibility.
+Site catalog model. Supports both SQLite (v3-v4) and PostgreSQL (v5+).
+All enrichment and v5 fields are nullable for backward compatibility.
 """
-from sqlalchemy import Column, Integer, String, DateTime, JSON
+from sqlalchemy import Column, Integer, String, DateTime, JSON, Float
 from .database import Base
 
 
@@ -35,6 +35,21 @@ class Site(Base):
     # Usage tracking: updated when site is viewed or returned in search/browse results
     # Enables heat score features and sample diversity
     last_used_at = Column(DateTime, nullable=True)
+    
+    # v5 Features
+    # Heat score: popularity metric combining usage count, recency, and engagement
+    # Higher = more popular/useful sample. Updated incrementally by ranking/search logic.
+    heat_score = Column(Float, nullable=True, default=0.0, index=True)
+    
+    # Site metadata: rich field storage for future features (search filters, analytics, etc.)
+    # Example: {"migrated_from": "sqlite", "source": "csv_import", "original_domain": "..."}
+    # Renamed from 'metadata' to 'site_metadata' to avoid SQLAlchemy reserved name conflict
+    site_metadata = Column(JSON, nullable=True)
+    
+    # Timestamps for auditing and expiration
+    created_at = Column(DateTime, nullable=True, index=True)
+    updated_at = Column(DateTime, nullable=True)
+
 
 
 class TagFeedback(Base):

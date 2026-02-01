@@ -98,20 +98,22 @@ def get_all_sites(db: Session) -> list[Site]:
 
 def _rank_site(site: Site, terms: Iterable[str]) -> float:
     """
-    Weighted ranking logic with diversity boost.
+    Weighted ranking logic with diversity boost and heat score (v5).
 
     Heuristic:
       - Name/domain match > path match > platform/industry match > tag match.
       - Tag matches boosted by tag_confidence.
       - Levenshtein typo tolerance on tokens.
       - Recent usage (last_used_at) applies LIGHT penalty to promote diversity.
+      - Heat score (v5): slight boost to high-heat sites (usage signal).
         Sites NOT recently used get slight boost (encourages sample diversity).
 
     Example behavior:
       - "webflow saas" returns Webflow SaaS pages above generic blogs.
       - "shop" returns ecommerce sites above blogs.
       - "design" surfaces agency/portfolio sites.
-      - Heavily-used sites slightly deprioritized to push users toward fresh samples.
+      - Heavily-used sites (high heat score) slightly prioritized but not to the extent of breaking relevance.
+      - Sites with recent usage deprioritized slightly to push users toward fresh samples.
     """
     from datetime import datetime, timedelta, timezone
 
@@ -201,6 +203,18 @@ def _rank_site(site: Site, terms: Iterable[str]) -> float:
             score *= (1.0 + diversity_penalty)
         except Exception:
             pass  # ignore any timestamp parse errors
+
+    # --- Heat score boost (v5) ---
+    # If heat_score is available, apply a small multiplier (1% per 10 heat points, capped at 5%).
+    # This slightly boosts popular sites without overwhelming relevance signal.
+    if hasattr(site, "heat_score") and site.heat_score:
+        try:
+            heat = float(site.heat_score)
+            # 10 heat points = 1% boost, max 5% boost (50 heat points)
+            heat_boost = min(0.05, 0.01 * (heat / 10.0))
+            score *= (1.0 + heat_boost)
+        except (TypeError, ValueError):
+            pass  # ignore if heat_score is invalid
 
     return score
 
@@ -369,3 +383,38 @@ def update_site_usage(db: Session, site_id: int) -> None:
             db.commit()
     except Exception:
         db.rollback()  # silently fail; never break read operations
+
+
+def get_sites_by_heat(db: Session, limit: int = 10, offset: int = 0) -> tuple[list[Site], int]:
+    """
+    Get sites ordered by heat score (v5 feature).
+    
+    Returns:
+        (list of Site objects, total count of all sites with heat_score > 0)
+    """
+    # Query sites with non-zero heat score, sorted descending
+    total = db.query(Site).filter(
+        (Site.heat_score > 0) | (Site.heat_score.is_(None))  # Include nulls as well
+    ).count()
+    
+    sites = db.query(Site).order_by(
+        Site.heat_score.desc().nullsfirst() if hasattr(Site, "heat_score") else Site.id.desc()
+    ).offset(offset).limit(limit).all()
+    
+    return sites, total
+
+
+def increment_heat_score(db: Session, site_id: int, amount: float = 1.0) -> None:
+    """
+    Increment heat score for a site (v5 feature - non-blocking).
+    Used to track popularity and usage frequency.
+    """
+    try:
+        site = db.query(Site).filter(Site.id == site_id).first()
+        if site:
+            current = float(site.heat_score or 0.0)
+            site.heat_score = current + amount
+            db.commit()
+    except Exception:
+        db.rollback()  # silently fail; never break read operations
+
