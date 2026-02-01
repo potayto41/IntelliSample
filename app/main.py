@@ -1,17 +1,22 @@
 from datetime import datetime as datetime_naive
 from fastapi import FastAPI, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from .database import SessionLocal, engine, ensure_enrichment_columns
 from .models import Base, Site, TagFeedback
 from . import crud
+from .enrichment import enrich_and_persist
+from .write_safety import add_site_limiter, upload_csv_limiter, validate_csv_upload, get_client_ip
 from .platform_icons import get_platform_icon_svg
 import csv
 import io
 import json
+import logging
 import math
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 ensure_enrichment_columns()
@@ -24,9 +29,12 @@ templates = Jinja2Templates(directory="app/templates")
 
 PAGE_SIZE = 10
 
-
 def _get_search_results(db, q: str, page: int):
-    """Shared search + pagination logic. Returns dict with sites, platform_icons, page, etc."""
+    """
+    Shared search + pagination logic. Returns dict with sites, platform_icons, page, etc.
+    
+    Note: Tags are hidden from frontend response (exposed only in API).
+    """
     q = (q or "").strip()
     if q:
         raw_page = page if page > 0 else 1
@@ -48,9 +56,32 @@ def _get_search_results(db, q: str, page: int):
         has_previous = False
         has_next = False
 
+    # Update last_used_at for returned sites (non-blocking)
+    for site in sites:
+        try:
+            crud.update_site_usage(db, site.id)
+        except Exception:
+            pass  # silently fail; never break read operations
+
     platform_icons = [get_platform_icon_svg(s.platform) for s in sites]
+    
+    # Prepare site data for frontend: hide tags, expose last_used_at
+    sites_data = []
+    for site in sites:
+        site_dict = {
+            "id": site.id,
+            "website_url": site.website_url,
+            "platform": site.platform,
+            "industry": site.industry,
+            "platforms": site.platforms or [],
+            "industries": site.industries or [],
+            "colors": site.colors or {},
+            "last_used_at": site.last_used_at.isoformat() if site.last_used_at else None,
+        }
+        sites_data.append(site_dict)
+    
     return {
-        "sites": sites,
+        "sites": sites_data,
         "platform_icons": platform_icons,
         "query": q,
         "query_encoded": quote(q),
@@ -91,75 +122,152 @@ def search(request: Request, q: str = "", page: int = 1):
         {"request": request, **ctx},
     )
 
-@app.post("/upload-csv")
-async def upload_csv(file: UploadFile = File(...)):
-    if not file.filename.endswith(".csv"):
-        return {"error": "Only CSV files are allowed"}
 
-    content = await file.read()
-    decoded = content.decode("utf-8")
-    reader = csv.DictReader(io.StringIO(decoded))
-
-    sites = []
-    for row in reader:
-        url = row.get("website_url", "").strip()
-        if not url:
-            continue
-        platform_legacy = row.get("platform", "").strip()
-        industry_legacy = row.get("industry", "").strip()
-        tags_legacy = row.get("tags", "").strip()
-        # Enriched columns (optional): platforms, industries, colors, tag_confidence, last_enriched_at, enrichment_signals
-        platforms_json = row.get("platforms", "").strip()
-        industries_json = row.get("industries", "").strip()
-        colors_json = row.get("colors", "").strip()
-        tag_conf_json = row.get("tag_confidence", "").strip()
-        last_enriched = row.get("last_enriched_at", "").strip()
-        signals_json = row.get("enrichment_signals", "").strip()
-
-        platforms = json.loads(platforms_json) if platforms_json else None
-        industries = json.loads(industries_json) if industries_json else None
-        colors = json.loads(colors_json) if colors_json else None
-        tag_confidence = json.loads(tag_conf_json) if tag_conf_json else None
-        enrichment_signals = json.loads(signals_json) if signals_json else None
-
-        # Backward compat: keep platform/industry/tags for display
-        if platforms and not platform_legacy:
-            platform_legacy = ", ".join(p for p in platforms[:3])
-        if industries and not industry_legacy:
-            industry_legacy = ", ".join(i for i in industries[:3])
-        if tag_confidence and not tags_legacy:
-            tags_legacy = ", ".join(sorted(tag_confidence.keys(), key=lambda t: -tag_confidence.get(t, 0))[:6])
-
-        rec = {
-            "website_url": url,
-            "platform": platform_legacy or None,
-            "industry": industry_legacy or None,
-            "tags": tags_legacy or None,
-        }
-        if platforms is not None:
-            rec["platforms"] = platforms
-        if industries is not None:
-            rec["industries"] = industries
-        if colors is not None:
-            rec["colors"] = colors
-        if tag_confidence is not None:
-            rec["tag_confidence"] = tag_confidence
-        if enrichment_signals is not None:
-            rec["enrichment_signals"] = enrichment_signals
-        if last_enriched:
-            try:
-                rec["last_enriched_at"] = datetime_naive.fromisoformat(
-                    last_enriched.replace("Z", "+00:00")
-                )
-            except Exception:
-                pass
-        sites.append(rec)
+@app.get("/api/suggestions")
+def suggestions(q: str = ""):
+    """
+    Return autocomplete suggestions for search.
+    Useful for "Did you mean…" functionality.
+    """
+    q = (q or "").strip()
+    if len(q) < 2:
+        return JSONResponse({"suggestions": []})
 
     db = SessionLocal()
-    created = crud.bulk_create_sites(db, sites)
-    db.close()
+    try:
+        sugg = crud.get_search_suggestions(db, q, limit=5)
+        return JSONResponse({"suggestions": sugg})
+    finally:
+        db.close()
 
-    return {"message": f"{created} sites imported successfully"}
+@app.post("/upload-csv")
+async def upload_csv(request: Request, file: UploadFile = File(...)):
+    """
+    Bulk upload sites via CSV with automatic enrichment.
+
+    Safe processing: one bad row does not fail the entire batch.
+    Returns success count, failure count, and error details per row.
+
+    CSV should have a 'website_url' column.
+
+    Rate limited: 2 uploads per IP per minute.
+    Max file size: 5 MB. Max rows: 500.
+    """
+    ip = get_client_ip(request)
+    logger.info(f"POST /upload-csv from {ip}: {file.filename}")
+
+    # Rate limiting
+    if not upload_csv_limiter.is_allowed(ip):
+        logger.warning(f"Upload rate limit hit for {ip}")
+        return JSONResponse(
+            {"error": "Too many uploads. Please wait before trying again."},
+            status_code=429,
+        )
+
+    if not file.filename or not file.filename.endswith(".csv"):
+        logger.warning(f"Invalid file type from {ip}: {file.filename}")
+        return JSONResponse(
+            {"error": "Only CSV files are allowed"},
+            status_code=400,
+        )
+
+    try:
+        content = await file.read()
+    except Exception as e:
+        logger.error(f"Failed to read file from {ip}: {e}")
+        return JSONResponse(
+            {"error": "Failed to read file"},
+            status_code=400,
+        )
+
+    # Validate file size
+    file_size = len(content)
+    if file_size > 5 * 1024 * 1024:  # 5 MB
+        logger.warning(f"CSV too large from {ip}: {file_size} bytes")
+        return JSONResponse(
+            {"error": "File too large (max 5 MB)"},
+            status_code=413,
+        )
+
+    try:
+        decoded = content.decode("utf-8")
+    except Exception as e:
+        logger.error(f"Failed to decode CSV from {ip}: {e}")
+        return JSONResponse(
+            {"error": "Failed to decode CSV (must be UTF-8)"},
+            status_code=400,
+        )
+
+    reader = csv.DictReader(io.StringIO(decoded))
+    if not reader.fieldnames or "website_url" not in reader.fieldnames:
+        logger.warning(f"Invalid CSV format from {ip}: missing website_url column")
+        return JSONResponse(
+            {"error": "CSV must have a 'website_url' column"},
+            status_code=400,
+        )
+
+    db = SessionLocal()
+    success_count = 0
+    failure_count = 0
+    errors = []
+    row_idx = 2  # account for header
+
+    try:
+        for row in reader:
+            # Enforce row limit
+            if row_idx - 2 >= 500:  # 500 data rows max
+                logger.warning(f"CSV row limit exceeded from {ip}")
+                errors.append({
+                    "row": row_idx,
+                    "url": "",
+                    "error": "CSV exceeds 500-row limit",
+                })
+                break
+
+            url = row.get("website_url", "").strip()
+            if not url:
+                failure_count += 1
+                errors.append({"row": row_idx, "url": url, "error": "Empty URL"})
+                row_idx += 1
+                continue
+
+            # Run enrichment pipeline independently per row
+            ok, error_msg, result = enrich_and_persist(db, url)
+            if ok:
+                success_count += 1
+                logger.info(f"Row {row_idx}: ✅ {url}")
+            else:
+                failure_count += 1
+                logger.warning(f"Row {row_idx}: ❌ {url} - {error_msg}")
+                errors.append({
+                    "row": row_idx,
+                    "url": url,
+                    "error": error_msg or "Unknown error",
+                })
+
+            row_idx += 1
+
+        logger.info(f"CSV upload from {ip} complete: {success_count} succeeded, {failure_count} failed")
+        return JSONResponse(
+            {
+                "status": "complete",
+                "success_count": success_count,
+                "failure_count": failure_count,
+                "errors": errors[:50] if errors else [],  # limit error details
+            },
+            status_code=200,
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in /upload-csv from {ip}: {e}")
+        return JSONResponse(
+            {
+                "status": "error",
+                "error": "Internal server error during upload",
+            },
+            status_code=500,
+        )
+    finally:
+        db.close()
 
 
 @app.post("/tag-feedback")
@@ -192,26 +300,63 @@ async def tag_feedback(website_url: str = Form(...), suggested_tags: str = Form(
 
 
 @app.post("/add-site")
-async def add_site(
-    website_url: str = Form(...),
-    platform: str = Form(""),
-    industry: str = Form(""),
-    tags: str = Form(""),
-):
-    """Add a single site from the manual form and redirect home."""
-    db = SessionLocal()
-    crud.bulk_create_sites(
-        db,
-        [
-            {
-                "website_url": website_url.strip(),
-                "platform": platform.strip(),
-                "industry": industry.strip(),
-                "tags": tags.strip(),
-            }
-        ],
-    )
-    db.close()
+async def add_site(request: Request, website_url: str = Form(...)):
+    """
+    Add a single site with automatic enrichment.
 
-    # Redirect back to the homepage so the new entry shows up
-    return RedirectResponse(url="/", status_code=303)
+    Accepts a URL, runs the centralized enrichment pipeline,
+    and returns the enriched result or error.
+
+    Rate limited: 10 requests per IP per minute.
+    """
+    ip = get_client_ip(request)
+    url = (website_url or "").strip()
+    logger.info(f"POST /add-site from {ip}: {url}")
+
+    # Rate limiting
+    if not add_site_limiter.is_allowed(ip):
+        logger.warning(f"Rate limit hit for {ip}")
+        return JSONResponse(
+            {"error": "Too many requests. Please wait before trying again."},
+            status_code=429,
+        )
+
+    if not url:
+        return JSONResponse(
+            {"error": "URL is required"},
+            status_code=400,
+        )
+
+    db = SessionLocal()
+    try:
+        success, error_msg, result = enrich_and_persist(db, url)
+        if success and result:
+            logger.info(f"✅ Successfully enriched {url}")
+            return JSONResponse(
+                {
+                    "status": "success",
+                    "message": f"Site {url} added successfully",
+                    "site": result.to_dict(),
+                },
+                status_code=201,
+            )
+        else:
+            logger.error(f"❌ Failed to enrich {url}: {error_msg}")
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "error": error_msg or "Unknown error during enrichment",
+                },
+                status_code=400,
+            )
+    except Exception as e:
+        logger.error(f"Unexpected error in /add-site: {e}")
+        return JSONResponse(
+            {
+                "status": "error",
+                "error": "Internal server error",
+            },
+            status_code=500,
+        )
+    finally:
+        db.close()

@@ -32,6 +32,10 @@ class Site(Base):
     # Example: {"platform_scores": {...}, "industry_scores": {...}, "color_sources": {...}}
     enrichment_signals = Column(JSON, nullable=True)
 
+    # Usage tracking: updated when site is viewed or returned in search/browse results
+    # Enables heat score features and sample diversity
+    last_used_at = Column(DateTime, nullable=True)
+
 
 class TagFeedback(Base):
     """

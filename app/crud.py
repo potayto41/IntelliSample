@@ -98,20 +98,23 @@ def get_all_sites(db: Session) -> list[Site]:
 
 def _rank_site(site: Site, terms: Iterable[str]) -> float:
     """
-    Weighted ranking logic.
+    Weighted ranking logic with diversity boost.
 
-    Rough heuristic:
+    Heuristic:
       - Name/domain match > path match > platform/industry match > tag match.
-      - Tag matches are boosted by tag_confidence when available.
-      - Small typo tolerance via Levenshtein distance on tokens.
-
-    This is intentionally simple and explainable, but works well up to ~50k rows.
+      - Tag matches boosted by tag_confidence.
+      - Levenshtein typo tolerance on tokens.
+      - Recent usage (last_used_at) applies LIGHT penalty to promote diversity.
+        Sites NOT recently used get slight boost (encourages sample diversity).
 
     Example behavior:
-      - \"webflow saas\" returns Webflow SaaS landing pages above generic blogs.
-      - \"shop\" returns ecommerce sites (Shopify, store, cart…) above blogs.
-      - \"design\" surfaces agency/portfolio/UI-heavy sites.
+      - "webflow saas" returns Webflow SaaS pages above generic blogs.
+      - "shop" returns ecommerce sites above blogs.
+      - "design" surfaces agency/portfolio sites.
+      - Heavily-used sites slightly deprioritized to push users toward fresh samples.
     """
+    from datetime import datetime, timedelta, timezone
+
     score = 0.0
 
     url = _norm(site.website_url)
@@ -177,6 +180,28 @@ def _rank_site(site: Site, terms: Iterable[str]) -> float:
                 if _levenshtein(term, field) == 1:
                     score += 1.0
 
+    # --- Diversity boost: lightly penalize heavily-used sites ---
+    # Sites not accessed recently get a small bonus to encourage sample diversity.
+    # This is a LIGHT penalty (~1-2%) to avoid breaking existing relevance.
+    if site.last_used_at:
+        try:
+            now = datetime.now(timezone.utc)
+            if isinstance(site.last_used_at, str):
+                # Parse ISO string if stored as string
+                last_used = datetime.fromisoformat(site.last_used_at.replace("Z", "+00:00"))
+            else:
+                last_used = site.last_used_at
+            
+            # Days since last use
+            delta_days = (now - last_used).days
+            
+            # Light penalty: older access = bonus (promote diversity)
+            # 1 day old = 0% penalty, 30 days old = 1% bonus, 365 days = 3% bonus
+            diversity_penalty = max(0.0, -0.0001 * delta_days)  # negative = bonus
+            score *= (1.0 + diversity_penalty)
+        except Exception:
+            pass  # ignore any timestamp parse errors
+
     return score
 
 
@@ -198,7 +223,7 @@ def search_sites_paginated(db: Session, query: str, skip: int, limit: int) -> tu
       * Phase 1 (SQL): use LIKE filters on normalized query + synonyms to
         get a reasonable candidate set (fast on 10k–50k rows).
       * Phase 2 (Python): compute a ranking score per candidate based on
-        domain/platform/industry/tags + tag_confidence.
+        domain/platform/industry/tags + tag_confidence + diversity.
       * If Phase 1 finds no candidates, fall back to a fuzzy scan over all
         rows using a lightweight Levenshtein distance.
     """
@@ -277,6 +302,47 @@ def search_sites_paginated(db: Session, query: str, skip: int, limit: int) -> tu
     return page_items, total
 
 
+def get_search_suggestions(db: Session, partial: str, limit: int = 5) -> list[str]:
+    """
+    Return partial-word suggestions for autocomplete / "Did you mean…".
+    
+    Searches platforms, industries, and tags for partial matches.
+    Returns unique suggestions sorted by frequency.
+    """
+    partial = _norm(partial)
+    if not partial or len(partial) < 2:
+        return []
+
+    all_sites = db.query(Site).all()
+    suggestions: dict[str, int] = {}
+
+    for site in all_sites:
+        # Check platforms
+        platforms = site.platforms if isinstance(site.platforms, list) else []
+        for p in platforms:
+            p_norm = _norm(p)
+            if partial in p_norm:
+                suggestions[p] = suggestions.get(p, 0) + 1
+
+        # Check industries
+        industries = site.industries if isinstance(site.industries, list) else []
+        for i in industries:
+            i_norm = _norm(i)
+            if partial in i_norm:
+                suggestions[i] = suggestions.get(i, 0) + 1
+
+        # Check tags
+        tags = site.tags or ""
+        for tag in tags.split(","):
+            tag = tag.strip()
+            if tag and partial in _norm(tag):
+                suggestions[tag] = suggestions.get(tag, 0) + 1
+
+    # Sort by frequency (descending), then alphabetically
+    sorted_suggestions = sorted(suggestions.items(), key=lambda x: (-x[1], x[0]))
+    return [s[0] for s in sorted_suggestions[:limit]]
+
+
 def bulk_create_sites(db: Session, sites: list[dict]) -> int:
     created = 0
     for site in sites:
@@ -288,3 +354,18 @@ def bulk_create_sites(db: Session, sites: list[dict]) -> int:
         except IntegrityError:
             db.rollback()  # skip duplicates safely
     return created
+
+
+def update_site_usage(db: Session, site_id: int) -> None:
+    """
+    Update last_used_at timestamp for a site (non-blocking, safe).
+    Call this when a site is viewed or returned in search results.
+    """
+    try:
+        from datetime import datetime, timezone
+        site = db.query(Site).filter(Site.id == site_id).first()
+        if site:
+            site.last_used_at = datetime.now(timezone.utc)
+            db.commit()
+    except Exception:
+        db.rollback()  # silently fail; never break read operations

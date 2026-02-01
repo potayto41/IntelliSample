@@ -31,6 +31,7 @@ def ensure_enrichment_columns():
         ("tag_confidence", "TEXT"),
         ("last_enriched_at", "TEXT"),
         ("enrichment_signals", "TEXT"),
+        ("last_used_at", "TEXT"),
     ]
     with engine.connect() as conn:
         r = conn.execute(text(
