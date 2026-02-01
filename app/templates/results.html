@@ -1,0 +1,104 @@
+{# Partial: result cards + pagination. Used by GET / (include) and GET /search (AJAX). #}
+<div class="card table-card">
+    <div class="card-header">
+        <h2>Sites</h2>
+    </div>
+    <div class="results-box">
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Website</th>
+                        <th>Platform</th>
+                        <th>Industry</th>
+                        <th>Tags</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if sites %}
+                        {% for site in sites %}
+                        <tr>
+                            <td class="cell-url">
+                                <a href="{{ site.website_url }}" target="_blank" rel="noopener">
+                                    {{ site.website_url }}
+                                </a>
+                            </td>
+                            <td>
+                                <span class="cell-platform-inner">
+                                    {{ platform_icons[loop.index0] | safe }}
+                                    {% if site.platform %}
+                                        <span class="pill pill-platform">{{ site.platform }}</span>
+                                    {% else %}
+                                        <span class="muted">Unknown</span>
+                                    {% endif %}
+                                </span>
+                            </td>
+                            <td>{{ site.industry or '—' }}</td>
+                            <td class="cell-tags">
+                                {% if site.tags %}
+                                    {% for tag in site.tags.split(',') %}
+                                        {% set trimmed = tag.strip() %}
+                                        {% if trimmed %}
+                                            <span class="tag-pill">{{ trimmed }}</span>
+                                        {% endif %}
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="muted">No tags</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="4" class="empty">
+                                {% if query %}
+                                    No sites match your search. Try different keywords or add sites via Add Sites.
+                                {% else %}
+                                    No sites shown yet. Use the search above or add sites via Add Sites.
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if query and total_results > 0 %}
+    <nav class="pagination">
+        {% if has_previous %}
+        <a
+                            href="/?q={{ query_encoded }}&page={{ page - 1 }}"
+                            class="page-link page-prev"
+                            data-q="{{ query | e }}"
+                            data-page="{{ page - 1 }}"
+                        >
+                            <svg class="icon icon-pagination" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                            Previous
+                        </a>
+        {% else %}
+        <span class="page-link page-prev page-disabled">
+                            <svg class="icon icon-pagination" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                            Previous
+                        </span>
+        {% endif %}
+
+        {% if has_next %}
+        <a
+                            href="/?q={{ query_encoded }}&page={{ page + 1 }}"
+                            class="page-link page-next"
+                            data-q="{{ query | e }}"
+                            data-page="{{ page + 1 }}"
+                        >
+                            Next
+                            <svg class="icon icon-pagination" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                        </a>
+        {% else %}
+        <span class="page-link page-next page-disabled">
+                            Next
+                            <svg class="icon icon-pagination" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                        </span>
+        {% endif %}
+    </nav>
+    {% endif %}
+</div>

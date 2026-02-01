@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Add Sites — Sample Dispenser v3</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="app-topbar">
+        <div class="app-topbar-inner">
+            <a href="/" class="app-topbar-logo">Sample Dispenser v3</a>
+            <nav class="app-nav">
+                <a href="/" class="app-nav-link">Browse</a>
+                <a href="/add-sites" class="app-nav-link app-nav-link-active">Add Sites</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="app-announcement">
+        <div class="app-announcement-inner">
+            🧪 Read-only mode active. New samples will be accepted in a future update.
+        </div>
+    </div>
+
+    <main class="main-content">
+        <div class="container container--wide">
+            <header class="page-header">
+                <h1 class="page-title">Add Sites</h1>
+                <p class="page-subtitle">
+                    Add a single site manually or bulk upload from CSV. All fields are optional except the URL.
+                </p>
+            </header>
+
+            <!-- Manual add form (UI only — no API wiring) -->
+            <section class="section-card card">
+                <div class="card-header">
+                    <h2>Add site manually</h2>
+                    <p class="card-subtitle">
+                        Quickly add a single site to your catalog.
+                    </p>
+                </div>
+                <form class="add-form" action="#" method="post" onsubmit="return false;">
+                    <div class="add-form-grid">
+                        <label class="field">
+                            <span class="field-label">Website URL *</span>
+                            <input type="url" name="website_url" placeholder="https://example.com" required>
+                        </label>
+                        <label class="field">
+                            <span class="field-label">Platform</span>
+                            <input type="text" name="platform" placeholder="Webflow, Shopify, WordPress, custom...">
+                        </label>
+                        <label class="field">
+                            <span class="field-label">Industry</span>
+                            <input type="text" name="industry" placeholder="SaaS, agency, e‑commerce, education...">
+                        </label>
+                        <label class="field">
+                            <span class="field-label">Tags</span>
+                            <input type="text" name="tags" placeholder="hero video, dark mode, pricing table (comma‑separated)">
+                        </label>
+                    </div>
+                    <button type="submit" class="btn-primary" disabled>Add site (coming soon)</button>
+                </form>
+            </section>
+
+            <!-- Bulk upload (UI only — no API wiring) -->
+            <section class="section-card card">
+                <div class="card-header">
+                    <h2>Bulk upload (.csv)</h2>
+                    <p class="card-subtitle">
+                        Upload a CSV file with columns: website_url, platform, industry, tags.
+                    </p>
+                </div>
+                <form class="upload-form" action="#" method="post" enctype="multipart/form-data" onsubmit="return false;">
+                    <label class="field field--file">
+                        <span class="field-label">Choose CSV file</span>
+                        <input type="file" name="file" accept=".csv" disabled>
+                    </label>
+                    <button type="submit" class="btn-primary" disabled>Upload (coming soon)</button>
+                </form>
+            </section>
+        </div>
+    </main>
+
+    <footer class="app-footer">
+        <div class="app-footer-inner">
+            <div class="app-footer-credit">
+                <div><strong>Mahe Muntaser</strong></div>
+                <div>IGN: Kiri</div>
+                <div class="app-footer-actions">
+                    <a class="footer-button footer-button-linkedin" href="https://www.linkedin.com/in/mahe-tests-game/" target="_blank" rel="noopener">LinkedIn</a>
+                    <a class="footer-button footer-button-youtube" href="https://www.youtube.com/@Kiriplaysgames" target="_blank" rel="noopener">YouTube</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

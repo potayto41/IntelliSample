@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sample Dispenser v3</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="app-topbar">
+        <div class="app-topbar-inner">
+            <a href="/" class="app-topbar-logo">⚙️Sample Dispenser v3</a>
+            <nav class="app-nav">
+                <a href="/" class="app-nav-link app-nav-link-active">Browse</a>
+                <a href="/add-sites" class="app-nav-link">Add Sites</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="app-announcement">
+        <div class="app-announcement-inner">
+            🧪 Read-only mode active. New samples will be accepted in a future update.
+        </div>
+    </div>
+
+    <main class="main-content">
+        <div class="container container--wide">
+            <header class="page-header">
+                <div>
+                    <h1 class="page-title">Browse</h1>
+                    <p class="page-subtitle">
+                        Local-first catalog of marketing sites. Search by URL, platform, industry, or tags.
+                    </p>
+                </div>
+                <div class="header-meta">
+                    <span class="pill pill-soft">{{ total_results }} results</span>
+                    {% if query %}
+                    <span class="pill pill-outline">Search: "{{ query }}"</span>
+                    {% endif %}
+                </div>
+            </header>
+
+            <!-- Search & filter section -->
+            <section class="section-search">
+                <form method="get" action="/" class="search-form card">
+                    <label class="field">
+                        <span class="field-label">Search sites</span>
+                        <div class="search-input-wrap">
+                            <svg class="icon icon-search" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                            <input type="text" name="q" placeholder="e.g. webflow, saas, agency, e‑commerce, wordpress" value="{{ query }}">
+                        </div>
+                    </label>
+                    <div class="search-actions">
+                        <button type="submit">Search</button>
+                        <a href="/" class="ghost-button">Clear</a>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Results list -->
+            <section class="section-results">
+                <div id="results-container">
+                    {% include "results.html" %}
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="app-footer">
+        <div class="app-footer-inner">
+            <div class="app-footer-credit">
+                <div><strong>Mahe Muntaser</strong></div>
+                <div>IGN: Kiri</div>
+                <div class="app-footer-actions">
+                    <a class="footer-button footer-button-linkedin" href="https://www.linkedin.com/in/mahe-tests-game/" target="_blank" rel="noopener">LinkedIn</a>
+                    <a class="footer-button footer-button-youtube" href="https://www.youtube.com/@Kiriplaysgames" target="_blank" rel="noopener">YouTube</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+    <script>
+(function () {
+    var form = document.querySelector('.search-form');
+    var container = document.getElementById('results-container');
+    if (!form || !container) return;
+
+    function setLoading(loading) {
+        container.classList.toggle('loading', !!loading);
+    }
+
+    function updateResults(q, page) {
+        var url = '/search?q=' + encodeURIComponent(q || '') + '&page=' + (page || 1);
+        setLoading(true);
+        fetch(url, { headers: { 'Accept': 'text/html' } })
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+                container.innerHTML = html;
+                setLoading(false);
+                var newUrl = q ? '/?q=' + encodeURIComponent(q) + (page > 1 ? '&page=' + page : '') : '/';
+                history.replaceState(null, '', newUrl);
+            })
+            .catch(function () {
+                setLoading(false);
+                window.location.href = '/?q=' + encodeURIComponent(q || '') + (page > 1 ? '&page=' + page : '');
+            });
+    }
+
+    form.addEventListener('submit', function (e) {
+        var input = form.querySelector('input[name="q"]');
+        var q = input ? input.value : '';
+        e.preventDefault();
+        updateResults(q, 1);
+    });
+
+    document.addEventListener('click', function (e) {
+        var link = e.target && e.target.closest && e.target.closest('.pagination a.page-link');
+        if (!link || link.classList.contains('page-disabled')) return;
+        var q = link.getAttribute('data-q');
+        var page = link.getAttribute('data-page');
+        if (page == null) return;
+        e.preventDefault();
+        updateResults(q || '', parseInt(page, 10) || 1);
+    });
+
+    var clearBtn = document.querySelector('.search-form .ghost-button[href="/"]');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            var input = form.querySelector('input[name="q"]');
+            if (input) input.value = '';
+            updateResults('', 1);
+        });
+    }
+})();
+    </script>
+</body>
+</html>
