@@ -7,6 +7,13 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <!-- Offline / system unavailable banner -->
+    <div class="offline-banner">
+        <div class="offline-banner-inner">
+            ⚠️ System offline — Engine unavailable
+        </div>
+    </div>
+
     <header class="app-topbar">
         <div class="app-topbar-inner">
             <a href="/" class="app-topbar-logo">⚙️Sample Dispenser v3</a>
@@ -16,12 +23,6 @@
             </nav>
         </div>
     </header>
-
-    <div class="app-announcement">
-        <div class="app-announcement-inner">
-            🧪 Read-only mode active. New samples will be accepted in a future update.
-        </div>
-    </div>
 
     <main class="main-content">
         <div class="container container--wide">
@@ -131,6 +132,36 @@
             updateResults('', 1);
         });
     }
+})();
+
+    <!-- System initialization & offline detection -->
+    <script>
+(function () {
+    var offlineBanner = document.querySelector('.offline-banner');
+    
+    // Offline detection
+    function updateOfflineState() {
+        var isOnline = navigator.onLine;
+        if (offlineBanner) {
+            offlineBanner.classList.toggle('active', !isOnline);
+        }
+    }
+    
+    // Check on startup
+    updateOfflineState();
+    
+    // Listen for online/offline changes
+    window.addEventListener('online', updateOfflineState);
+    window.addEventListener('offline', updateOfflineState);
+    
+    // Periodic health check to backend (optional: improve reliability)
+    setInterval(function () {
+        if (navigator.onLine) {
+            fetch('/').catch(function () {
+                if (offlineBanner) offlineBanner.classList.add('active');
+            });
+        }
+    }, 10000);
 })();
     </script>
 </body>

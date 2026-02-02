@@ -1,3 +1,9 @@
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if it exists
+load_dotenv()
+
 from datetime import datetime as datetime_naive
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -18,8 +24,17 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
-Base.metadata.create_all(bind=engine)
-ensure_enrichment_columns()
+# Database initialization (skip for now - tables already created in PostgreSQL)
+# Tables can be created manually with: python -c "from dotenv import load_dotenv; load_dotenv(); from app.database import Base, engine; from app.models import *; Base.metadata.create_all(bind=engine)"
+# try:
+#     Base.metadata.create_all(bind=engine)
+# except Exception as e:
+#     logger.warning(f"Could not create tables on startup: {e}")
+# 
+# try:
+#     ensure_enrichment_columns()
+# except Exception as e:
+#     logger.warning(f"Could not ensure enrichment columns: {e}")
 
 app = FastAPI()
 
