@@ -7,13 +7,6 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <!-- Offline / system unavailable banner -->
-    <div class="offline-banner">
-        <div class="offline-banner-inner">
-            ⚠️ System offline — Engine unavailable
-        </div>
-    </div>
-
     <header class="app-topbar">
         <div class="app-topbar-inner">
             <a href="/" class="app-topbar-logo">Sample Dispenser v3</a>
@@ -23,6 +16,12 @@
             </nav>
         </div>
     </header>
+
+    <div class="app-announcement">
+        <div class="app-announcement-inner">
+            🧪 Read-only mode active. New samples will be accepted in a future update.
+        </div>
+    </div>
 
     <main class="main-content">
         <div class="container container--wide">
@@ -41,7 +40,7 @@
                         Quickly add a single site to your catalog.
                     </p>
                 </div>
-                <form class="add-form" action="/add-site" method="post" id="add-form">
+                <form class="add-form" action="#" method="post" onsubmit="return false;">
                     <div class="add-form-grid">
                         <label class="field">
                             <span class="field-label">Website URL *</span>
@@ -60,8 +59,7 @@
                             <input type="text" name="tags" placeholder="hero video, dark mode, pricing table (comma‑separated)">
                         </label>
                     </div>
-                    <button type="submit" class="btn-primary">Add site</button>
-                    <div id="add-status" style="margin-top: 10px;"></div>
+                    <button type="submit" class="btn-primary" disabled>Add site (coming soon)</button>
                 </form>
             </section>
 
@@ -73,13 +71,12 @@
                         Upload a CSV file with columns: website_url, platform, industry, tags.
                     </p>
                 </div>
-                <form class="upload-form" action="/upload-csv" method="post" enctype="multipart/form-data" id="upload-form">
+                <form class="upload-form" action="#" method="post" enctype="multipart/form-data" onsubmit="return false;">
                     <label class="field field--file">
                         <span class="field-label">Choose CSV file</span>
-                        <input type="file" name="file" accept=".csv">
+                        <input type="file" name="file" accept=".csv" disabled>
                     </label>
-                    <button type="submit" class="btn-primary">Upload</button>
-                    <div id="upload-status" style="margin-top: 10px;"></div>
+                    <button type="submit" class="btn-primary" disabled>Upload (coming soon)</button>
                 </form>
             </section>
         </div>
@@ -97,118 +94,5 @@
             </div>
         </div>
     </footer>
-
-    <!-- System initialization & offline detection -->
-    <script>
-(function () {
-    var offlineBanner = document.querySelector('.offline-banner');
-    
-    // Offline detection
-    function updateOfflineState() {
-        var isOnline = navigator.onLine;
-        if (offlineBanner) {
-            offlineBanner.classList.toggle('active', !isOnline);
-        }
-    }
-    
-    // Check on startup
-    updateOfflineState();
-    
-    // Listen for online/offline changes
-    window.addEventListener('online', updateOfflineState);
-    window.addEventListener('offline', updateOfflineState);
-    
-    // Periodic health check to backend (optional: improve reliability)
-    setInterval(function () {
-        if (navigator.onLine) {
-            fetch('/').catch(function () {
-                if (offlineBanner) offlineBanner.classList.add('active');
-            });
-        }
-    }, 10000);
-
-    // Handle CSV upload form
-    var uploadForm = document.getElementById('upload-form');
-    var uploadStatus = document.getElementById('upload-status');
-    
-    if (uploadForm && uploadStatus) {
-        uploadForm.addEventListener('submit', function (e) {
-            e.preventDefault();
-            
-            var formData = new FormData(uploadForm);
-            var fileInput = uploadForm.querySelector('input[type="file"]');
-            
-            if (!fileInput.files.length) {
-                uploadStatus.innerHTML = '<div style="color: red;">Please select a CSV file.</div>';
-                return;
-            }
-            
-            uploadStatus.innerHTML = '<div style="color: blue;">Uploading...</div>';
-            
-            fetch('/upload-csv', {
-                method: 'POST',
-                body: formData
-            })
-            .then(function (response) {
-                return response.json();
-            })
-            .then(function (data) {
-                if (data.status === 'complete') {
-                    uploadStatus.innerHTML = '<div style="color: green;">Upload complete! ' + data.success_count + ' sites added successfully. ' + (data.failure_count > 0 ? data.failure_count + ' failed.' : '') + '</div>';
-                    if (data.errors && data.errors.length > 0) {
-                        uploadStatus.innerHTML += '<details><summary>Errors</summary><ul>' + data.errors.map(function (err) {
-                            return '<li>Row ' + err.row + ': ' + err.error + '</li>';
-                        }).join('') + '</ul></details>';
-                    }
-                } else {
-                    uploadStatus.innerHTML = '<div style="color: red;">Error: ' + (data.error || 'Unknown error') + '</div>';
-                }
-            })
-            .catch(function (error) {
-                uploadStatus.innerHTML = '<div style="color: red;">Upload failed: ' + error.message + '</div>';
-            });
-        });
-    }
-
-    // Handle add site form
-    var addForm = document.getElementById('add-form');
-    var addStatus = document.getElementById('add-status');
-    
-    if (addForm && addStatus) {
-        addForm.addEventListener('submit', function (e) {
-            e.preventDefault();
-            
-            var formData = new FormData(addForm);
-            var urlInput = addForm.querySelector('input[name="website_url"]');
-            
-            if (!urlInput.value.trim()) {
-                addStatus.innerHTML = '<div style="color: red;">Please enter a website URL.</div>';
-                return;
-            }
-            
-            addStatus.innerHTML = '<div style="color: blue;">Adding site...</div>';
-            
-            fetch('/add-site', {
-                method: 'POST',
-                body: formData
-            })
-            .then(function (response) {
-                return response.json();
-            })
-            .then(function (data) {
-                if (data.status === 'success') {
-                    addStatus.innerHTML = '<div style="color: green;">Site added successfully!</div>';
-                    addForm.reset();
-                } else {
-                    addStatus.innerHTML = '<div style="color: red;">Error: ' + (data.error || 'Unknown error') + '</div>';
-                }
-            })
-            .catch(function (error) {
-                addStatus.innerHTML = '<div style="color: red;">Add failed: ' + error.message + '</div>';
-            });
-        });
-    }
-})();
-    </script>
 </body>
 </html>

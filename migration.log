@@ -1,6 +1,0 @@
-2026-02-02 20:06:22,557 [INFO] ============================================================
-2026-02-02 20:06:22,557 [INFO] SQLite to PostgreSQL Migration - Sample Dispenser v5
-2026-02-02 20:06:22,557 [INFO] Mode: FULL MIGRATION
-2026-02-02 20:06:22,558 [INFO] ============================================================
-2026-02-02 20:06:22,700 [ERROR] Failed to read SQLite sites: 'sqlite3.Row' object has no attribute 'get'
-2026-02-02 20:06:22,700 [ERROR] No sites to migrate. Aborting.
