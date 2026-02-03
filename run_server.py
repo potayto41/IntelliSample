@@ -10,7 +10,6 @@ import sys
 from dotenv import load_dotenv
 load_dotenv()
 
-print(f"PostgreSQL: {os.getenv('USE_POSTGRES')}")
 print(f"Database URL available: {bool(os.getenv('DATABASE_URL'))}")
 
 # Import and run

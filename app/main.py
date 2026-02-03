@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from .database import SessionLocal, engine, ensure_enrichment_columns
+from .database import SessionLocal, engine, ensure_enrichment_columns, ensure_postgres_indexes
 from .models import Base, Site, TagFeedback
 from . import crud
 from .enrichment import enrich_and_persist
@@ -18,8 +18,7 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
-Base.metadata.create_all(bind=engine)
-ensure_enrichment_columns()
+# Note: Base.metadata.create_all() moved to startup event to avoid import-time database operations
 
 app = FastAPI()
 
@@ -28,6 +27,37 @@ app.mount("/static", StaticFiles(directory="app/Static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 PAGE_SIZE = 10
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database schema and ensure enrichment columns exist."""
+    try:
+        logger.info("Running database schema initialization...")
+        # Only run schema creation if we're not using a managed database
+        # For Neon/PostgreSQL cloud services, tables should already exist
+        try:
+            Base.metadata.create_all(bind=engine)
+            logger.info("Base tables created/verified")
+        except Exception as e:
+            logger.warning(f"Could not create base tables (might already exist in managed DB): {e}")
+
+        try:
+            ensure_enrichment_columns()
+            logger.info("Enrichment columns ensured")
+        except Exception as e:
+            logger.warning(f"Could not ensure enrichment columns: {e}")
+
+        try:
+            ensure_postgres_indexes()
+            logger.info("PostgreSQL indexes created")
+        except Exception as e:
+            logger.warning(f"Could not create indexes: {e}")
+
+        logger.info("Database schema initialization completed")
+    except Exception as e:
+        logger.error(f"Database schema initialization failed: {e}")
+        # Don't crash the app, but log the error
+        pass
 
 def _get_search_results(db, q: str, page: int):
     """

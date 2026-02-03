@@ -23,7 +23,6 @@ POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "3600"))
 
 # Migration & data settings
 ENABLE_DATA_MIGRATION: bool = os.getenv("ENABLE_DATA_MIGRATION", "false").lower() == "true"
-SQLITE_PATH: str = os.getenv("SQLITE_PATH", "sample_dispenser.db")
 
 
 def get_database_url() -> str:
