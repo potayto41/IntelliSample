@@ -1,5 +1,5 @@
 """
-Site catalog model. Supports both SQLite (v3-v4) and PostgreSQL (v5+).
+Site catalog model for PostgreSQL.
 All enrichment and v5 fields are nullable for backward compatibility.
 """
 from sqlalchemy import Column, Integer, String, DateTime, JSON, Float
