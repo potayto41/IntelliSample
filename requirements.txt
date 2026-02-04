@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 psycopg2-binary
 requests
 beautifulsoup4
@@ -7,3 +7,5 @@ python-dotenv
 sqlalchemy
 jinja2
 python-multipart
+aiofiles
+pydantic
