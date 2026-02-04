@@ -169,6 +169,22 @@ export DATABASE_URL=postgresql://...
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
+## Render PostgreSQL Connection Example for FastAPI
+
+Add these to your Render environment variables or .env file:
+
+```
+DATABASE_HOST=your-db-host.render.com
+DATABASE_PORT=5432
+DATABASE_NAME=sampleforge
+DATABASE_USER=sampleforge_user
+DATABASE_PASSWORD=m7VunaxXOc1tds72AZTPUrJN2xY2ISxg
+```
+
+Your FastAPI app will automatically use these for database connection.
+
+No code changes needed if you use the updated config/postgres.py.
+
 ## File Changes Summary
 
 | File | Changes |

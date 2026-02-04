@@ -9,11 +9,11 @@ from urllib.parse import urlparse
 
 # Environment-based configuration
 DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL")
-DB_HOST: str = os.getenv("DB_HOST", "localhost")
-DB_PORT: int = int(os.getenv("DB_PORT", "5432"))
-DB_NAME: str = os.getenv("DB_NAME", "sample_dispenser")
-DB_USER: str = os.getenv("DB_USER", "postgres")
-DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
+DATABASE_HOST: str = os.getenv("DATABASE_HOST")
+DATABASE_PORT: str = os.getenv("DATABASE_PORT")
+DATABASE_NAME: str = os.getenv("DATABASE_NAME")
+DATABASE_USER: str = os.getenv("DATABASE_USER")
+DATABASE_PASSWORD: str = os.getenv("DATABASE_PASSWORD")
 
 # Connection pooling settings (optimized for Choreo/serverless)
 POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "5"))
@@ -28,16 +28,22 @@ ENABLE_DATA_MIGRATION: bool = os.getenv("ENABLE_DATA_MIGRATION", "false").lower(
 def get_database_url() -> str:
     """
     Build PostgreSQL connection string from environment variables.
-    Priority: DATABASE_URL env var > component env vars > local defaults
+    Priority: DATABASE_URL env var > Render-style env vars
     """
     if DATABASE_URL:
         return DATABASE_URL
-    
-    # Build from components (supports password-less auth for local dev)
-    if DB_PASSWORD:
-        return f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    missing = []
+    for var_name, var in zip([
+        "DATABASE_HOST", "DATABASE_PORT", "DATABASE_NAME", "DATABASE_USER"
+    ], [DATABASE_HOST, DATABASE_PORT, DATABASE_NAME, DATABASE_USER]):
+        if not var:
+            missing.append(var_name)
+    if missing:
+        raise RuntimeError(f"Missing required database environment variables: {missing}")
+    if DATABASE_PASSWORD:
+        return f"postgresql://{DATABASE_USER}:{DATABASE_PASSWORD}@{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}"
     else:
-        return f"postgresql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        return f"postgresql://{DATABASE_USER}@{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}"
 
 
 def get_sqlalchemy_url() -> str:

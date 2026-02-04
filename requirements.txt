@@ -1,7 +1,6 @@
 fastapi
 uvicorn
-jinja2
-sqlalchemy
-python-multipart
+psycopg2-binary
 requests
 beautifulsoup4
+python-dotenv
