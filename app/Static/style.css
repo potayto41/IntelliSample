@@ -815,6 +815,46 @@ th {
 }
 
 /* --------------------------------------------------------------------------
+   CSV upload progress bar
+   -------------------------------------------------------------------------- */
+#csv-upload-progress {
+    position: fixed;
+    left: 50%;
+    top: 2rem;
+    transform: translateX(-50%);
+    z-index: 9999;
+    min-width: 320px;
+    max-width: 90vw;
+    background: #fff;
+    border: 1px solid #0f7ba7;
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 8px rgba(15,123,167,0.08);
+    padding: 1rem 1.5rem 1.25rem 1.5rem;
+    display: block;
+}
+.progress-bar-bg {
+    width: 100%;
+    height: 1.25rem;
+    background: #e0e7ef;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #0f7ba7 0%, #0fdbf0 100%);
+    width: 0%;
+    transition: width 0.2s;
+}
+.progress-bar-label {
+    text-align: center;
+    font-size: 0.95rem;
+    color: #0f7ba7;
+    font-weight: 600;
+    margin-top: 0.25rem;
+}
+
+/* --------------------------------------------------------------------------
    Responsive breakpoints
    -------------------------------------------------------------------------- */
 

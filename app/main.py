@@ -1,6 +1,6 @@
 from datetime import datetime as datetime_naive
 from fastapi import FastAPI, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from .database import SessionLocal, engine, ensure_enrichment_columns, ensure_postgres_indexes
@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import math
+import time
 from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
@@ -183,121 +184,100 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
     Rate limited: 2 uploads per IP per minute.
     Max file size: 5 MB. Max rows: 500.
     """
-    ip = get_client_ip(request)
-    logger.info(f"POST /upload-csv from {ip}: {file.filename}")
+    async def event_stream():
+        ip = get_client_ip(request)
+        logger.info(f"POST /upload-csv from {ip}: {file.filename}")
 
-    # Rate limiting
-    if not upload_csv_limiter.is_allowed(ip):
-        logger.warning(f"Upload rate limit hit for {ip}")
-        return JSONResponse(
-            {"error": "Too many uploads. Please wait before trying again."},
-            status_code=429,
-        )
+        # Rate limiting
+        if not upload_csv_limiter.is_allowed(ip):
+            logger.warning(f"Upload rate limit hit for {ip}")
+            yield f"data: {{\"error\": \"Too many uploads. Please wait before trying again.\"}}\n\n"
+            return
 
-    if not file.filename or not file.filename.endswith(".csv"):
-        logger.warning(f"Invalid file type from {ip}: {file.filename}")
-        return JSONResponse(
-            {"error": "Only CSV files are allowed"},
-            status_code=400,
-        )
+        if not file.filename or not file.filename.endswith(".csv"):
+            logger.warning(f"Invalid file type from {ip}: {file.filename}")
+            yield f"data: {{\"error\": \"Only CSV files are allowed\"}}\n\n"
+            return
 
-    try:
-        content = await file.read()
-    except Exception as e:
-        logger.error(f"Failed to read file from {ip}: {e}")
-        return JSONResponse(
-            {"error": "Failed to read file"},
-            status_code=400,
-        )
+        try:
+            content = await file.read()
+        except Exception as e:
+            logger.error(f"Failed to read file from {ip}: {e}")
+            yield f"data: {{\"error\": \"Failed to read file\"}}\n\n"
+            return
 
-    # Validate file size
-    file_size = len(content)
-    if file_size > 5 * 1024 * 1024:  # 5 MB
-        logger.warning(f"CSV too large from {ip}: {file_size} bytes")
-        return JSONResponse(
-            {"error": "File too large (max 5 MB)"},
-            status_code=413,
-        )
+        # Validate file size
+        file_size = len(content)
+        if file_size > 5 * 1024 * 1024:  # 5 MB
+            logger.warning(f"CSV too large from {ip}: {file_size} bytes")
+            yield f"data: {{\"error\": \"File too large (max 5 MB)\"}}\n\n"
+            return
 
-    try:
-        decoded = content.decode("utf-8")
-    except Exception as e:
-        logger.error(f"Failed to decode CSV from {ip}: {e}")
-        return JSONResponse(
-            {"error": "Failed to decode CSV (must be UTF-8)"},
-            status_code=400,
-        )
+        try:
+            decoded = content.decode("utf-8")
+        except Exception as e:
+            logger.error(f"Failed to decode CSV from {ip}: {e}")
+            yield f"data: {{\"error\": \"Failed to decode CSV (must be UTF-8)\"}}\n\n"
+            return
 
-    reader = csv.DictReader(io.StringIO(decoded))
-    if not reader.fieldnames or "website_url" not in reader.fieldnames:
-        logger.warning(f"Invalid CSV format from {ip}: missing website_url column")
-        return JSONResponse(
-            {"error": "CSV must have a 'website_url' column"},
-            status_code=400,
-        )
+        reader = csv.DictReader(io.StringIO(decoded))
+        if not reader.fieldnames or "website_url" not in reader.fieldnames:
+            logger.warning(f"Invalid CSV format from {ip}: missing website_url column")
+            yield f"data: {{\"error\": \"CSV must have a 'website_url' column\"}}\n\n"
+            return
 
-    db = SessionLocal()
-    success_count = 0
-    failure_count = 0
-    errors = []
-    row_idx = 2  # account for header
+        try:
+            db = SessionLocal()
+            success_count = 0
+            failure_count = 0
+            errors = []
+            row_idx = 2
+            total_rows = sum(1 for _ in csv.DictReader(io.StringIO(content.decode("utf-8"))))
+            processed = 0
+            yield f"data: {{\"progress\":0}}\n\n"
+            for row in csv.DictReader(io.StringIO(content.decode("utf-8"))):
+                # Enforce row limit
+                if row_idx - 2 >= 500:  # 500 data rows max
+                    logger.warning(f"CSV row limit exceeded from {ip}")
+                    errors.append({
+                        "row": row_idx,
+                        "url": "",
+                        "error": "CSV exceeds 500-row limit",
+                    })
+                    break
 
-    try:
-        for row in reader:
-            # Enforce row limit
-            if row_idx - 2 >= 500:  # 500 data rows max
-                logger.warning(f"CSV row limit exceeded from {ip}")
-                errors.append({
-                    "row": row_idx,
-                    "url": "",
-                    "error": "CSV exceeds 500-row limit",
-                })
-                break
+                url = row.get("website_url", "").strip()
+                if not url:
+                    failure_count += 1
+                    errors.append({"row": row_idx, "url": url, "error": "Empty URL"})
+                    row_idx += 1
+                    continue
 
-            url = row.get("website_url", "").strip()
-            if not url:
-                failure_count += 1
-                errors.append({"row": row_idx, "url": url, "error": "Empty URL"})
+                # Run enrichment pipeline independently per row
+                ok, error_msg, result = enrich_and_persist(db, url)
+                if ok:
+                    success_count += 1
+                    logger.info(f"Row {row_idx}: ✅ {url}")
+                else:
+                    failure_count += 1
+                    logger.warning(f"Row {row_idx}: ❌ {url} - {error_msg}")
+                    errors.append({
+                        "row": row_idx,
+                        "url": url,
+                        "error": error_msg or "Unknown error",
+                    })
+
                 row_idx += 1
-                continue
+                processed += 1
+                percent = int((processed / total_rows) * 100)
+                yield f"data: {{\"progress\":{percent}}}\n\n"
+                time.sleep(0.01)
 
-            # Run enrichment pipeline independently per row
-            ok, error_msg, result = enrich_and_persist(db, url)
-            if ok:
-                success_count += 1
-                logger.info(f"Row {row_idx}: ✅ {url}")
-            else:
-                failure_count += 1
-                logger.warning(f"Row {row_idx}: ❌ {url} - {error_msg}")
-                errors.append({
-                    "row": row_idx,
-                    "url": url,
-                    "error": error_msg or "Unknown error",
-                })
-
-            row_idx += 1
-
-        logger.info(f"CSV upload from {ip} complete: {success_count} succeeded, {failure_count} failed")
-        return JSONResponse(
-            {
-                "status": "complete",
-                "success_count": success_count,
-                "failure_count": failure_count,
-                "errors": errors[:50] if errors else [],  # limit error details
-            },
-            status_code=200,
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error in /upload-csv from {ip}: {e}")
-        return JSONResponse(
-            {
-                "status": "error",
-                "error": "Internal server error during upload",
-            },
-            status_code=500,
-        )
-    finally:
-        db.close()
+            db.close()
+            yield f"data: {{\"progress\":100, \"status\":\"complete\"}}\n\n"
+        except Exception as e:
+            yield f"data: {{\"progress\":0, \"status\":\"error\", \"error\":\"{str(e)}\"}}\n\n"
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.post("/tag-feedback")

@@ -74,10 +74,11 @@
                 <form class="upload-form" action="#" method="post" enctype="multipart/form-data" onsubmit="return false;">
                     <label class="field field--file">
                         <span class="field-label">Choose CSV file</span>
-                        <input type="file" name="file" accept=".csv" disabled>
+                        <input type="file" name="file" accept=".csv">
                     </label>
-                    <button type="submit" class="btn-primary" disabled>Upload (coming soon)</button>
+                    <button type="submit" class="btn-primary">Upload</button>
                 </form>
+                <!-- Progress bar will be injected by JS -->
             </section>
         </div>
     </main>
@@ -95,4 +96,5 @@
         </div>
     </footer>
 </body>
+<script src="/static/csv_upload.js"></script>
 </html>
