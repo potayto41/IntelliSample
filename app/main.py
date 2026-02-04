@@ -3,6 +3,8 @@ from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session
 from .database import SessionLocal, engine, ensure_enrichment_columns, ensure_postgres_indexes
 from .models import Base, Site, TagFeedback
 from . import crud
@@ -171,6 +173,61 @@ def suggestions(q: str = ""):
     finally:
         db.close()
 
+
+def insert_pre_enriched_row(db: Session, row: dict) -> tuple[bool, str]:
+    """
+    Insert a pre-enriched row directly into the database.
+    
+    Returns (success, error_message)
+    """
+    try:
+        url = row.get("website_url", "").strip()
+        
+        # Check if site already exists
+        existing = db.query(Site).filter(Site.website_url == url).first()
+        if existing:
+            return False, "Site already exists"
+        
+        # Parse JSON fields
+        platforms = json.loads(row.get("platforms", "[]")) if row.get("platforms") else []
+        industries = json.loads(row.get("industries", "[]")) if row.get("industries") else []
+        colors = json.loads(row.get("colors", "{}")) if row.get("colors") else {}
+        tag_confidence = json.loads(row.get("tag_confidence", "{}")) if row.get("tag_confidence") else {}
+        enrichment_signals = json.loads(row.get("enrichment_signals", "{}")) if row.get("enrichment_signals") else {}
+        
+        # Parse timestamp
+        last_enriched_at = None
+        if row.get("last_enriched_at"):
+            try:
+                last_enriched_at = datetime.fromisoformat(row["last_enriched_at"].replace('Z', '+00:00'))
+            except ValueError:
+                pass
+        
+        # Create site
+        site = Site(
+            website_url=url,
+            platform=row.get("platform", ""),
+            industry=row.get("industry", ""),
+            tags=row.get("tags", ""),
+            platforms=platforms if platforms else None,
+            industries=industries if industries else None,
+            colors=colors if colors else None,
+            tag_confidence=tag_confidence if tag_confidence else None,
+            enrichment_signals=enrichment_signals if enrichment_signals else None,
+            last_enriched_at=last_enriched_at,
+            created_at=datetime_naive.now(),
+            updated_at=datetime_naive.now()
+        )
+        
+        db.add(site)
+        db.commit()
+        return True, ""
+        
+    except Exception as e:
+        db.rollback()
+        return False, str(e)
+
+
 @app.post("/upload-csv")
 async def upload_csv(request: Request, file: UploadFile = File(...)):
     """
@@ -226,6 +283,17 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
             yield f"data: {{\"error\": \"CSV must have a 'website_url' column\"}}\n\n"
             return
 
+        # Check if CSV contains pre-enriched data
+        enriched_columns = {"platforms", "industries", "colors", "tag_confidence", "enrichment_signals", "last_enriched_at"}
+        is_pre_enriched = enriched_columns.issubset(set(reader.fieldnames or []))
+        
+        if is_pre_enriched:
+            logger.info(f"CSV from {ip} contains pre-enriched data - skipping enrichment step")
+            yield f"data: {{\"message\": \"Detected pre-enriched CSV - fast import mode\"}}\n\n"
+        else:
+            logger.info(f"CSV from {ip} needs enrichment - standard processing")
+            yield f"data: {{\"message\": \"CSV needs enrichment - standard processing\"}}\n\n"
+
         try:
             db = SessionLocal()
             success_count = 0
@@ -253,19 +321,34 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
                     row_idx += 1
                     continue
 
-                # Run enrichment pipeline independently per row
-                ok, error_msg, result = enrich_and_persist(db, url)
-                if ok:
-                    success_count += 1
-                    logger.info(f"Row {row_idx}: ✅ {url}")
+                if is_pre_enriched:
+                    # Fast path: insert pre-enriched data directly
+                    ok, error_msg = insert_pre_enriched_row(db, row)
+                    if ok:
+                        success_count += 1
+                        logger.info(f"Row {row_idx}: ✅ {url} (pre-enriched)")
+                    else:
+                        failure_count += 1
+                        logger.warning(f"Row {row_idx}: ❌ {url} - {error_msg}")
+                        errors.append({
+                            "row": row_idx,
+                            "url": url,
+                            "error": error_msg or "Failed to insert pre-enriched data",
+                        })
                 else:
-                    failure_count += 1
-                    logger.warning(f"Row {row_idx}: ❌ {url} - {error_msg}")
-                    errors.append({
-                        "row": row_idx,
-                        "url": url,
-                        "error": error_msg or "Unknown error",
-                    })
+                    # Standard path: run enrichment pipeline
+                    ok, error_msg, result = enrich_and_persist(db, url)
+                    if ok:
+                        success_count += 1
+                        logger.info(f"Row {row_idx}: ✅ {url}")
+                    else:
+                        failure_count += 1
+                        logger.warning(f"Row {row_idx}: ❌ {url} - {error_msg}")
+                        errors.append({
+                            "row": row_idx,
+                            "url": url,
+                            "error": error_msg or "Unknown error",
+                        })
 
                 row_idx += 1
                 processed += 1

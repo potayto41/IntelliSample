@@ -3,6 +3,8 @@
    Mobile-first, responsive, clean layout with loading animation
    ========================================================================== */
 
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&display=swap');
+
 * {
     box-sizing: border-box;
     font-family: Arial, Helvetica, sans-serif;
@@ -115,6 +117,8 @@ a:hover {
     font-size: 0.95rem;
     font-weight: 600;
     letter-spacing: 0.02em;
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
 }
 
 .app-topbar-logo:hover {
@@ -705,6 +709,7 @@ th {
     border-top: 1px solid #e2e8f0;
     background: #1e293b;
     color: #e2e8f0;
+    font-family: 'Playfair Display', serif;
 }
 
 .app-footer-inner {

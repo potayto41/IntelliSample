@@ -163,7 +163,7 @@ def fetch_site(url: str) -> tuple[str, str, str]:
         return "", "", url
 
     soup = BeautifulSoup(html, "html.parser")
-    title = (soup.title.string or "").strip()
+    title = (soup.title.string or "").strip() if soup.title else ""
     meta = soup.find("meta", attrs={"name": "description"})
     desc = (meta.get("content", "") or "").strip() if meta and meta.get("content") else ""
     paragraphs = " ".join(p.get_text() for p in soup.find_all("p")[:14])
@@ -323,14 +323,14 @@ def enrich_one(url: str, html: str, text: str, base_url: str) -> dict:
     platforms = [p for p, _ in platforms_with_conf]
     industries = [i for i, _ in industries_with_conf]
 
-    # Raw signal snapshot for debugging / self-improvement.\n"
-    # Stored in the DB as JSON so future pipelines can introspect why a\n"
-    # platform/industry/color was chosen without re-scraping HTML.\n"
-    signals = {\n"
-        \"platform_scores\": {p: c for p, c in platforms_with_conf},\n"
-        \"industry_scores\": {i: c for i, c in industries_with_conf},\n"
-        \"colors\": colors,\n"
-    }\n"
+    # Raw signal snapshot for debugging / self-improvement.
+    # Stored in the DB as JSON so future pipelines can introspect why a
+    # platform/industry/color was chosen without re-scraping HTML.
+    signals = {
+        "platform_scores": {p: c for p, c in platforms_with_conf},
+        "industry_scores": {i: c for i, c in industries_with_conf},
+        "colors": colors,
+    }
 
     # Legacy display fields (first/join for UI)
     platform_legacy = ", ".join(platforms[:3]) if platforms else "Unknown"
