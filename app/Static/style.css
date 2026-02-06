@@ -3,11 +3,11 @@
    Mobile-first, responsive, clean layout with loading animation
    ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
 * {
     box-sizing: border-box;
-    font-family: 'Playfair Display', serif;
+    font-family: 'IBM Plex Sans', sans-serif;
 }
 
 /* --------------------------------------------------------------------------
@@ -116,11 +116,14 @@ a:hover {
 
 .app-topbar-logo {
     color: inherit;
-    font-size: 0.95rem;
+    font-size: 1.4rem;
     font-weight: 600;
     letter-spacing: 0.02em;
-    font-family: 'Playfair Display', serif;
+    font-family: 'IBM Plex Sans', sans-serif;
     font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
 }
 
 .app-topbar-logo:hover {
@@ -234,7 +237,7 @@ a:hover {
     font-weight: 700;
     color: #ffffff;
     text-align: center;
-    font-family: 'Playfair Display', serif;
+    font-family: 'IBM Plex Sans', sans-serif;
 }
 
 .page-subtitle {
@@ -316,7 +319,7 @@ a:hover {
     font-size: 1.05rem;
     font-weight: 700;
     color: #ffffff;
-    font-family: 'Playfair Display', serif;
+    font-family: 'IBM Plex Sans', sans-serif;
 }
 
 .card-subtitle {
@@ -726,7 +729,7 @@ th {
     border-top: 1px solid #e2e8f0;
     background: #1e293b;
     color: #e2e8f0;
-    font-family: 'Playfair Display', serif;
+    font-family: 'IBM Plex Sans', sans-serif;
 }
 
 .app-footer-inner {
@@ -827,13 +830,6 @@ th {
 .footer-button-youtube:hover {
     border-color: rgba(239, 68, 68, 1);
     background: rgba(239, 68, 68, 0.15);
-}
-
-/* Table row hover (desktop) */
-@media (hover: hover) {
-    .results-box tbody tr:hover {
-        background: #f8fafc;
-    }
 }
 
 /* --------------------------------------------------------------------------

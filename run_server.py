@@ -8,12 +8,8 @@ import sys
 from dotenv import load_dotenv
 load_dotenv()
 
-<<<<<<< HEAD
-print(f"Database URL available: {bool(os.getenv('DATABASE_URL'))}")
-=======
 print(f"USE_POSTGRES: {os.getenv('USE_POSTGRES')}")
-print(f"DATABASE_URL available: {bool(os.getenv('DATABASE_URL'))}")
->>>>>>> b7d3917 (Update: Render-ready config, v5 docs, requirements, and fixes)
+print(f"Database URL available: {bool(os.getenv('DATABASE_URL'))}")
 
 try:
     from app.main import app
