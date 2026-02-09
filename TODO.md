@@ -1,6 +1,6 @@
-# TODO: Turn on Add Sites Feature
+# TODO: Fix Vercel Configuration for FastAPI Deployment
 
-- [x] Remove read-only announcement from add-sites.html
-- [x] Enable and wire the manual add site form to /add-site API endpoint
-- [x] Add JavaScript to handle manual form submission and display results
-- [x] Verify the changes work correctly
+- [ ] Check git status for any uncommitted changes
+- [ ] If changes exist, commit with message "Fix Vercel configuration: remove legacy builds property and use modern functions configuration"
+- [ ] Push the changes to GitHub
+- [ ] Ensure the repository is ready for redeployment on Vercel
