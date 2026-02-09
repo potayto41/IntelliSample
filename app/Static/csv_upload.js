@@ -28,8 +28,46 @@ function hideUploadProgressBar() {
     if (bar) bar.style.display = 'none';
 }
 
+// Handle manual add site form
+function handleAddSiteForm() {
+    const form = document.querySelector('.add-form');
+    if (!form) return;
+    const resultDiv = document.getElementById('add-site-result');
+    form.onsubmit = function(e) {
+        e.preventDefault();
+        const formData = new FormData(form);
+        const submitBtn = form.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Adding...';
+        resultDiv.innerHTML = '';
+
+        fetch('/add-site', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                resultDiv.innerHTML = `<div style="color: green; padding: 1rem; border: 1px solid green; border-radius: 4px;">✅ ${data.message}</div>`;
+                form.reset();
+            } else {
+                resultDiv.innerHTML = `<div style="color: red; padding: 1rem; border: 1px solid red; border-radius: 4px;">❌ ${data.error}</div>`;
+            }
+        })
+        .catch(error => {
+            resultDiv.innerHTML = `<div style="color: red; padding: 1rem; border: 1px solid red; border-radius: 4px;">❌ Network error: ${error.message}</div>`;
+        })
+        .finally(() => {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Add site';
+        });
+    };
+}
+
 // Attach to CSV upload form
 window.addEventListener('DOMContentLoaded', function() {
+    handleAddSiteForm();
+
     const form = document.querySelector('.upload-form');
     if (!form) return;
     const fileInput = form.querySelector('input[type="file"]');

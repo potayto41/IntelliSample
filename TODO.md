@@ -1,10 +1,6 @@
-cripty# Migration to Supabase Database
+# TODO: Turn on Add Sites Feature
 
-## Steps to Complete Migration
-
-- [x] Update DATABASE_URL in app/config/postgres.py to use Supabase URL
-- [x] Create database tables on Supabase using SQLAlchemy models
-- [x] Run bulk import script to populate data from sites_enriched.csv
-- [ ] Seed heat data using seed_heat_data.py
-- [ ] Test connection and verify data import
-- [ ] Run the app to ensure it works with Supabase
+- [x] Remove read-only announcement from add-sites.html
+- [x] Enable and wire the manual add site form to /add-site API endpoint
+- [x] Add JavaScript to handle manual form submission and display results
+- [x] Verify the changes work correctly
