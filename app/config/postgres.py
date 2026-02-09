@@ -8,7 +8,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 # Environment-based configuration
-DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL")
+DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL", "postgresql://postgres:nImeiBkERO3aJJk1@db.nksmmzobbnjaojfnocwh.supabase.co:5432/postgres")
 DATABASE_HOST: str = os.getenv("DATABASE_HOST")
 DATABASE_PORT: str = os.getenv("DATABASE_PORT")
 DATABASE_NAME: str = os.getenv("DATABASE_NAME")

@@ -18,6 +18,7 @@ import csv
 import json
 import os
 import sys
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,7 +30,7 @@ from app.models import Site, Base
 from app.config.postgres import get_sqlalchemy_url
 
 
-def bulk_import_enriched_sites(csv_path: str = None) -> dict:
+def bulk_import_enriched_sites(csv_path: str = None, start_row: int = 1) -> dict:
     """
     Bulk import enriched sites from CSV to PostgreSQL.
 
@@ -57,6 +58,8 @@ def bulk_import_enriched_sites(csv_path: str = None) -> dict:
             sites_data = []
 
             for row_num, row in enumerate(reader, start=2):
+                if row_num < start_row:
+                    continue
                 try:
                     url = row.get('website_url', '').strip()
                     if not url:
@@ -137,12 +140,37 @@ def bulk_import_enriched_sites(csv_path: str = None) -> dict:
                     errors.append(f"Row {row_num}: {str(e)}")
                     continue
 
-        # Bulk insert
+        # Insert sites individually with proper duplicate handling
         if sites_data:
-            print(f"💾 Bulk inserting {len(sites_data)} sites...")
-            db.bulk_save_objects(sites_data)
-            db.commit()
-            print("✅ Bulk insert completed!")
+            print(f"💾 Inserting {len(sites_data)} sites individually...")
+            successful = 0
+            conflicts = 0
+
+            imported_count = 0
+            for site in sites_data:
+                if imported_count >= 1:  # Limit to 1 site
+                    break
+                try:
+                    # Check if exists first
+                    existing = db.query(Site).filter(Site.website_url == site.website_url).first()
+                    if existing:
+                        conflicts += 1
+                        continue
+
+                    db.add(site)
+                    db.commit()
+                    successful += 1
+                    imported_count += 1
+
+                    if (successful + conflicts) % 100 == 0:
+                        print(f"📊 Processed {successful + conflicts}/{len(sites_data)} sites (inserted: {successful}, skipped: {conflicts})...")
+
+                except Exception as e:
+                    db.rollback()
+                    errors.append(f"Insert failed for {site.website_url}: {str(e)}")
+                    continue
+
+            print(f"✅ Individual inserts completed: {successful} inserted, {conflicts} skipped")
 
         return {
             'imported': imported,
