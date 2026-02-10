@@ -35,11 +35,6 @@ PAGE_SIZE = 10
 @app.on_event("startup")
 async def startup_event():
     """Initialize database schema and ensure enrichment columns exist."""
-    # Skip database initialization on Vercel (serverless)
-    if os.getenv("VERCEL"):
-        logger.info("Running on Vercel - skipping database schema initialization")
-        return
-
     try:
         logger.info("Running database schema initialization...")
         # Only run schema creation if we're not using a managed database

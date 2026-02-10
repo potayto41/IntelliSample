@@ -1,14 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Direct app startup script for PostgreSQL testing.
+Container entry point for Choreo deployment.
 """
 import os
 import sys
 from dotenv import load_dotenv
 load_dotenv()
 
-print(f"USE_POSTGRES: {os.getenv('USE_POSTGRES')}")
 print(f"Database URL available: {bool(os.getenv('DATABASE_URL'))}")
 
 try:
