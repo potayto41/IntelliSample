@@ -5,8 +5,12 @@ Container entry point for Choreo deployment.
 """
 import os
 import sys
-from dotenv import load_dotenv
-load_dotenv()
+if os.getenv("ENVIRONMENT", "").lower() == "development":
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
 
 print(f"Database URL available: {bool(os.getenv('DATABASE_URL'))}")
 

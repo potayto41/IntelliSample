@@ -1,12 +1,12 @@
 import os
 from datetime import datetime as datetime_naive
-from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi import FastAPI, Request, UploadFile, File, Form, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from sqlalchemy.orm import Session
-from .database import SessionLocal, engine, ensure_enrichment_columns, ensure_postgres_indexes
+from sqlalchemy import text
+from .database import engine, ensure_enrichment_columns, ensure_postgres_indexes, get_db
 from .models import Base, Site, TagFeedback
 from . import crud
 from .enrichment import enrich_and_persist
@@ -37,13 +37,13 @@ async def startup_event():
     """Initialize database schema and ensure enrichment columns exist."""
     try:
         logger.info("Running database schema initialization...")
-        # Only run schema creation if we're not using a managed database
-        # For Neon/PostgreSQL cloud services, tables should already exist
-        try:
-            Base.metadata.create_all(bind=engine)
-            logger.info("Base tables created/verified")
-        except Exception as e:
-            logger.warning(f"Could not create base tables (might already exist in managed DB): {e}")
+        # Only create schema automatically in development
+        if os.getenv("ENVIRONMENT", "").lower() == "development":
+            try:
+                Base.metadata.create_all(bind=engine)
+                logger.info("Base tables created/verified (development)")
+            except Exception as e:
+                logger.warning(f"Could not create base tables: {e}")
 
         try:
             ensure_enrichment_columns()
@@ -91,7 +91,8 @@ def _get_search_results(db, q: str, page: int):
         has_next = False
 
     # Update last_used_at for returned sites (non-blocking)
-    for site in sites:
+            # DB session is managed by dependency; do not close here
+            yield f"data: {{\"progress\":100, \"status\":\"complete\"}}\n\n"
         try:
             crud.update_site_usage(db, site.id)
         except Exception:
@@ -129,10 +130,8 @@ def _get_search_results(db, q: str, page: int):
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request, q: str = "", page: int = 1):
-    db = SessionLocal()
+def index(request: Request, q: str = "", page: int = 1, db: Session = Depends(get_db)):
     ctx = _get_search_results(db, q, page)
-    db.close()
     return templates.TemplateResponse(
         "index.html",
         {"request": request, **ctx},
@@ -146,11 +145,9 @@ def add_sites_page(request: Request):
 
 
 @app.get("/search", response_class=HTMLResponse)
-def search(request: Request, q: str = "", page: int = 1):
+def search(request: Request, q: str = "", page: int = 1, db: Session = Depends(get_db)):
     """Returns only the results section HTML (partial) for AJAX replacement."""
-    db = SessionLocal()
     ctx = _get_search_results(db, q, page)
-    db.close()
     return templates.TemplateResponse(
         "results.html",
         {"request": request, **ctx},
@@ -158,7 +155,7 @@ def search(request: Request, q: str = "", page: int = 1):
 
 
 @app.get("/api/suggestions")
-def suggestions(q: str = ""):
+def suggestions(q: str = "", db: Session = Depends(get_db)):
     """
     Return autocomplete suggestions for search.
     Useful for "Did you mean…" functionality.
@@ -167,12 +164,8 @@ def suggestions(q: str = ""):
     if len(q) < 2:
         return JSONResponse({"suggestions": []})
 
-    db = SessionLocal()
-    try:
-        sugg = crud.get_search_suggestions(db, q, limit=5)
-        return JSONResponse({"suggestions": sugg})
-    finally:
-        db.close()
+    sugg = crud.get_search_suggestions(db, q, limit=5)
+    return JSONResponse({"suggestions": sugg})
 
 
 def insert_pre_enriched_row(db: Session, row: dict) -> tuple[bool, str]:
@@ -230,7 +223,7 @@ def insert_pre_enriched_row(db: Session, row: dict) -> tuple[bool, str]:
 
 
 @app.post("/upload-csv")
-async def upload_csv(request: Request, file: UploadFile = File(...)):
+async def upload_csv(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """
     Bulk upload sites via CSV with automatic enrichment.
 
@@ -365,7 +358,7 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
 
 
 @app.post("/tag-feedback")
-async def tag_feedback(website_url: str = Form(...), suggested_tags: str = Form(...)):
+async def tag_feedback(website_url: str = Form(...), suggested_tags: str = Form(...), db: Session = Depends(get_db)):
     """
     Anonymous tag feedback endpoint.
 
@@ -376,25 +369,21 @@ async def tag_feedback(website_url: str = Form(...), suggested_tags: str = Form(
     if not url or not suggested_tags.strip():
         return {"status": "ignored"}
 
-    db = SessionLocal()
-    try:
-        site = db.query(Site).filter(Site.website_url == url).first()
-        fb = TagFeedback(
-            site_id=site.id if site else None,
-            website_url=url,
-            suggested_tags=suggested_tags.strip(),
-            created_at=datetime_naive.now(),
-        )
-        db.add(fb)
-        db.commit()
-    finally:
-        db.close()
+    site = db.query(Site).filter(Site.website_url == url).first()
+    fb = TagFeedback(
+        site_id=site.id if site else None,
+        website_url=url,
+        suggested_tags=suggested_tags.strip(),
+        created_at=datetime_naive.now(),
+    )
+    db.add(fb)
+    db.commit()
 
     return {"status": "ok"}
 
 
 @app.post("/add-site")
-async def add_site(request: Request, website_url: str = Form(...)):
+async def add_site(request: Request, website_url: str = Form(...), db: Session = Depends(get_db)):
     """
     Add a single site with automatic enrichment.
 
@@ -421,7 +410,6 @@ async def add_site(request: Request, website_url: str = Form(...)):
             status_code=400,
         )
 
-    db = SessionLocal()
     try:
         success, error_msg, result = enrich_and_persist(db, url)
         if success and result:
@@ -452,5 +440,22 @@ async def add_site(request: Request, website_url: str = Form(...)):
             },
             status_code=500,
         )
-    finally:
-        db.close()
+    # DB session closed by dependency
+
+
+@app.get("/health/db")
+def health_db(db: Session = Depends(get_db)):
+    """Simple DB connectivity health check."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return JSONResponse({"status": "ok", "db": True})
+    except Exception as e:
+        logger.exception("DB health check failed")
+        return JSONResponse({"status": "error", "db": False, "error": str(e)}, status_code=500)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port)

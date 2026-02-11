@@ -1,29 +1,23 @@
 import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.exc import SQLAlchemyError
 
-# PostgreSQL configuration
-from app.config.postgres import get_sqlalchemy_url, get_pool_config
-DATABASE_URL = get_sqlalchemy_url()
+# Use DATABASE_URL from environment. Fail fast if missing.
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set")
 
-# Create PostgreSQL engine with connection pooling
-pool_config = get_pool_config()
+# SQLAlchemy engine with sensible pooling for production
 engine = create_engine(
     DATABASE_URL,
-    poolclass=QueuePool,
-    pool_size=pool_config["pool_size"],
-    max_overflow=pool_config["max_overflow"],
-    pool_timeout=pool_config["pool_timeout"],
-    pool_recycle=pool_config["pool_recycle"],
-    pool_pre_ping=pool_config["pool_pre_ping"],
+    pool_pre_ping=True,
+    pool_size=int(os.getenv("DB_POOL_SIZE", 5)),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 10)),
+    pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 1800)),
 )
 
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
@@ -48,15 +42,16 @@ def ensure_enrichment_columns():
         ("updated_at", "TIMESTAMP WITH TIME ZONE"),
     ]
 
-    with engine.connect() as conn:
+    try:
+        with engine.connect() as conn:
         # Check if sites table exists
         result = conn.execute(text(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='sites')"
         ))
         table_exists = result.scalar()
 
-        if not table_exists:
-            return
+            if not table_exists:
+                return
 
         # Get existing columns
         result = conn.execute(text(
@@ -65,10 +60,13 @@ def ensure_enrichment_columns():
         existing = {row[0] for row in result}
 
         # Add missing columns
-        for name, typ in cols_to_add:
-            if name not in existing:
-                conn.execute(text(f'ALTER TABLE sites ADD COLUMN "{name}" {typ}'))
-                conn.commit()
+            for name, typ in cols_to_add:
+                if name not in existing:
+                    conn.execute(text(f'ALTER TABLE sites ADD COLUMN "{name}" {typ}'))
+                    conn.commit()
+    except SQLAlchemyError:
+        # Fail gracefully; schema migration should be managed explicitly in production
+        return
 
 
 def ensure_postgres_indexes():
@@ -84,12 +82,27 @@ def ensure_postgres_indexes():
         ("idx_sites_created_at", "sites", "created_at DESC"),
     ]
 
-    with engine.connect() as conn:
-        for idx_name, table_name, columns in indexes:
-            try:
-                conn.execute(text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name} ({columns})"))
-                conn.commit()
-            except Exception as e:
-                # Index may already exist; ignore gracefully
-                pass
+    try:
+        with engine.connect() as conn:
+            for idx_name, table_name, columns in indexes:
+                try:
+                    conn.execute(text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name} ({columns})"))
+                    conn.commit()
+                except Exception:
+                    # Index may already exist; ignore gracefully
+                    pass
+    except SQLAlchemyError:
+        # Ignore index creation errors in production
+        return
+
+
+def get_db():
+    """
+    Dependency for FastAPI endpoints. Yields a new DB session per request.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
