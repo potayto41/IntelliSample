@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: sample-search
+    runtime: python311
+    
+    # Build configuration
+    buildCommand: |
+      pip install --upgrade pip && \
+      pip install -r requirements.txt
+    
+    # Start command
+    startCommand: gunicorn -w 4 -b 0.0.0.0:$PORT app.main:app
+    
+    # Environment
+    envVars:
+      # Set in Render Dashboard Environment Variables:
+      # - DATABASE_URL: postgresql://user:password@host:5432/database?sslmode=require
+      # - ENVIRONMENT: production
+      # - PORT: 8080 (default)
+      - key: ENVIRONMENT
+        value: production
+      
+      # Database connection pooling - auto-detected based on DATABASE_URL
+      # Leave these unset to use intelligent defaults
+      # - DB_POOL_SIZE (auto: 5 for Render, 1 for Supabase pooler)
+      # - DB_MAX_OVERFLOW (auto: 10 for Render, 2 for Supabase pooler) 
+      # - DB_POOL_RECYCLE (auto: 3600 for Render, 300 for Supabase pooler)
+    
+    # Port
+    port: 8080
+    
+    # Health check for load balancer
+    healthCheckPath: /health/db
+    
+    # Auto-deploy on git push
+    autoDeploy: true
+    
+    # Region (optional, defaults to US-West)
+    # region: oregon
+
+# Render PostgreSQL database (if you want Render to create one)
+# databases:
+#   - name: sampleforge
+#     plan: standard
+#     region: oregon
+#
+# Then your DATABASE_URL would be:
+# postgresql://username:password@<slug>.render.com:5432/sampleforge?sslmode=require

@@ -146,10 +146,7 @@ def bulk_import_enriched_sites(csv_path: str = None, start_row: int = 1) -> dict
             successful = 0
             conflicts = 0
 
-            imported_count = 0
             for site in sites_data:
-                if imported_count >= 1:  # Limit to 1 site
-                    break
                 try:
                     # Check if exists first
                     existing = db.query(Site).filter(Site.website_url == site.website_url).first()
@@ -160,7 +157,6 @@ def bulk_import_enriched_sites(csv_path: str = None, start_row: int = 1) -> dict
                     db.add(site)
                     db.commit()
                     successful += 1
-                    imported_count += 1
 
                     if (successful + conflicts) % 100 == 0:
                         print(f"📊 Processed {successful + conflicts}/{len(sites_data)} sites (inserted: {successful}, skipped: {conflicts})...")

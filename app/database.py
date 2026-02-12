@@ -11,26 +11,50 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set")
 
-# Validate DATABASE_URL format for Supabase pooler
-if "postgresql+psycopg2://" not in DATABASE_URL:
-    logger.warning(
-        "DATABASE_URL should use postgresql+psycopg2:// driver. "
-        "Ensure you're using Supabase Transaction Pooler (port 6543), not direct connection (port 5432)."
-    )
+# Detect database type and optimize pool settings accordingly
+is_supabase_pooler = "pooler.supabase.com" in DATABASE_URL
+is_supabase_direct = "supabase.co" in DATABASE_URL
+is_render = "render.com" in DATABASE_URL or "postgres.railway.app" in DATABASE_URL
+is_localhost = "localhost" in DATABASE_URL
 
-# SQLAlchemy engine optimized for Supabase Transaction Pooler
-# CRITICAL: Use small pool_size because pooler manages connection pooling server-side
+# Set pool defaults based on database type
+if is_supabase_pooler:
+    # Supabase Transaction Pooler: Small pools (server-side pooling)
+    default_pool_size = 1
+    default_max_overflow = 2
+    default_pool_recycle = 300
+    logger.info("Detected: Supabase Transaction Pooler (port 6543)")
+elif is_render or is_supabase_direct:
+    # Render or direct Supabase: Can handle standard pools
+    default_pool_size = 5
+    default_max_overflow = 10
+    default_pool_recycle = 3600
+    logger.info(f"Detected: {'Render' if is_render else 'Supabase direct'} PostgreSQL")
+elif is_localhost:
+    # Local development: Use efficient pool settings
+    default_pool_size = 5
+    default_max_overflow = 10
+    default_pool_recycle = 3600
+    logger.info("Detected: Local PostgreSQL (development)")
+else:
+    # Unknown: Use conservative settings
+    default_pool_size = 3
+    default_max_overflow = 5
+    default_pool_recycle = 1800
+    logger.warning(f"Unknown database host in: {DATABASE_URL[:50]}... Using conservative pool settings")
+
+# SQLAlchemy engine configuration (auto-tuned by database type)
 connect_args = {"sslmode": "require"}
-if "pooler.supabase.com" not in DATABASE_URL and "localhost" not in DATABASE_URL:
-    # Only enforce SSL for remote databases
-    connect_args["sslmode"] = "require"
+if is_localhost:
+    # Local development: SSL optional
+    connect_args = {}
 
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,  # Test connection before use (prevents stale connections)
-    pool_size=int(os.getenv("DB_POOL_SIZE", 1)),  # CRITICAL: Must be 1 or 2 for pooler
-    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 2)),  # Keep small; pooler handles overflow
-    pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 300)),  # Recycle connections every 5 minutes
+    pool_size=int(os.getenv("DB_POOL_SIZE", default_pool_size)),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", default_max_overflow)),
+    pool_recycle=int(os.getenv("DB_POOL_RECYCLE", default_pool_recycle)),
     connect_args=connect_args,
 )
 
