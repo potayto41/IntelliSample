@@ -6,10 +6,17 @@ from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
 logger = logging.getLogger(__name__)
 
-# Use DATABASE_URL from environment. Fail fast if missing.
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL environment variable is not set")
+# Resolve DATABASE_URL using project config helper (supports component env vars)
+try:
+    from .config.postgres import get_sqlalchemy_url
+
+    DATABASE_URL = get_sqlalchemy_url()
+except Exception as e:
+    raise RuntimeError(
+        "Database configuration error: {}.\nEnsure DATABASE_URL or component env vars (DATABASE_HOST, DATABASE_USER, etc.) are set in Render.".format(
+            e
+        )
+    )
 
 # Detect database type and optimize pool settings accordingly
 is_supabase_pooler = "pooler.supabase.com" in DATABASE_URL
