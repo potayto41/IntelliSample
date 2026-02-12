@@ -1,25 +1,59 @@
 import os
+import logging
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
+
+logger = logging.getLogger(__name__)
 
 # Use DATABASE_URL from environment. Fail fast if missing.
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set")
 
-# SQLAlchemy engine with sensible pooling for production
+# Validate DATABASE_URL format for Supabase pooler
+if "postgresql+psycopg2://" not in DATABASE_URL:
+    logger.warning(
+        "DATABASE_URL should use postgresql+psycopg2:// driver. "
+        "Ensure you're using Supabase Transaction Pooler (port 6543), not direct connection (port 5432)."
+    )
+
+# SQLAlchemy engine optimized for Supabase Transaction Pooler
+# CRITICAL: Use small pool_size because pooler manages connection pooling server-side
+connect_args = {"sslmode": "require"}
+if "pooler.supabase.com" not in DATABASE_URL and "localhost" not in DATABASE_URL:
+    # Only enforce SSL for remote databases
+    connect_args["sslmode"] = "require"
+
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=int(os.getenv("DB_POOL_SIZE", 5)),
-    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 10)),
-    pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 1800)),
+    pool_pre_ping=True,  # Test connection before use (prevents stale connections)
+    pool_size=int(os.getenv("DB_POOL_SIZE", 1)),  # CRITICAL: Must be 1 or 2 for pooler
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 2)),  # Keep small; pooler handles overflow
+    pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 300)),  # Recycle connections every 5 minutes
+    connect_args=connect_args,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+# Track database connection status
+db_connection_healthy = False
+
+
+def check_database_connection() -> bool:
+    """
+    Verify database connection is active.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except (OperationalError, SQLAlchemyError) as e:
+        logger.error(f"Database connection check failed: {e}")
+        return False
 
 
 def ensure_enrichment_columns():
@@ -27,6 +61,7 @@ def ensure_enrichment_columns():
     Add enrichment columns to existing 'sites' table if missing.
     Safe to run multiple times; no-op when table missing or columns exist.
     PostgreSQL-specific implementation using JSONB for complex data types.
+    Fails gracefully if database is unavailable.
     """
     cols_to_add = [
         ("industries", "JSONB"),
@@ -44,34 +79,36 @@ def ensure_enrichment_columns():
 
     try:
         with engine.connect() as conn:
-        # Check if sites table exists
-        result = conn.execute(text(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='sites')"
-        ))
-        table_exists = result.scalar()
+            # Check if sites table exists
+            result = conn.execute(text(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='sites')"
+            ))
+            table_exists = result.scalar()
 
             if not table_exists:
                 return
 
-        # Get existing columns
-        result = conn.execute(text(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='sites'"
-        ))
-        existing = {row[0] for row in result}
+            # Get existing columns
+            result = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='sites'"
+            ))
+            existing = {row[0] for row in result}
 
-        # Add missing columns
+            # Add missing columns
             for name, typ in cols_to_add:
                 if name not in existing:
                     conn.execute(text(f'ALTER TABLE sites ADD COLUMN "{name}" {typ}'))
                     conn.commit()
-    except SQLAlchemyError:
+    except (OperationalError, SQLAlchemyError) as e:
         # Fail gracefully; schema migration should be managed explicitly in production
+        logger.warning(f"Could not ensure enrichment columns: {e}")
         return
 
 
 def ensure_postgres_indexes():
     """
     Create PostgreSQL-specific indexes for improved query performance.
+    Fails gracefully if database is unavailable.
     """
     indexes = [
         ("idx_sites_url", "sites", "website_url"),
@@ -91,8 +128,9 @@ def ensure_postgres_indexes():
                 except Exception:
                     # Index may already exist; ignore gracefully
                     pass
-    except SQLAlchemyError:
-        # Ignore index creation errors in production
+    except (OperationalError, SQLAlchemyError) as e:
+        # Ignore index creation errors in production; log for visibility
+        logger.warning(f"Could not create indexes: {e}")
         return
 
 

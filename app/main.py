@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from .database import engine, ensure_enrichment_columns, ensure_postgres_indexes, get_db
+from .database import engine, ensure_enrichment_columns, ensure_postgres_indexes, get_db, check_database_connection
 from .models import Base, Site, TagFeedback
 from . import crud
 from .enrichment import enrich_and_persist
@@ -22,6 +22,9 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
+# Database connection health status
+db_connection_healthy = False
+
 # Note: Base.metadata.create_all() moved to startup event to avoid import-time database operations
 
 app = FastAPI()
@@ -35,8 +38,18 @@ PAGE_SIZE = 10
 @app.on_event("startup")
 async def startup_event():
     """Initialize database schema and ensure enrichment columns exist."""
+    global db_connection_healthy
     try:
         logger.info("Running database schema initialization...")
+        
+        # Check database connectivity first
+        if not check_database_connection():
+            logger.warning("Database connection check failed on startup. App will continue but DB operations may fail.")
+            db_connection_healthy = False
+        else:
+            db_connection_healthy = True
+            logger.info("Database connection check passed")
+        
         # Only create schema automatically in development
         if os.getenv("ENVIRONMENT", "").lower() == "development":
             try:
@@ -444,15 +457,33 @@ async def add_site(request: Request, website_url: str = Form(...), db: Session =
 
 
 @app.get("/health/db")
-def health_db(db: Session = Depends(get_db)):
-    """Simple DB connectivity health check."""
+def health_db():
+    """
+    Database connectivity health check endpoint.
+    
+    Attempts SELECT 1 query to verify database connection.
+    
+    Returns:
+        200 OK: {"status": "ok"} if database is reachable
+        500 Error: {"status": "error", "detail": "..."} if database is unreachable
+    """
     try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return JSONResponse({"status": "ok", "db": True})
+        if check_database_connection():
+            return JSONResponse(
+                {"status": "ok"},
+                status_code=200
+            )
+        else:
+            return JSONResponse(
+                {"status": "error", "detail": "Database connection check failed"},
+                status_code=500
+            )
     except Exception as e:
-        logger.exception("DB health check failed")
-        return JSONResponse({"status": "error", "db": False, "error": str(e)}, status_code=500)
+        logger.error(f"DB health check failed: {e}")
+        return JSONResponse(
+            {"status": "error", "detail": str(e)},
+            status_code=500
+        )
 
 
 if __name__ == "__main__":
