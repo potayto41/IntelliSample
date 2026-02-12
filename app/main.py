@@ -104,12 +104,14 @@ def _get_search_results(db, q: str, page: int):
         has_next = False
 
     # Update last_used_at for returned sites (non-blocking)
-            # DB session is managed by dependency; do not close here
-            yield f"data: {{\"progress\":100, \"status\":\"complete\"}}\n\n"
-        try:
-            crud.update_site_usage(db, site.id)
-        except Exception:
-            pass  # silently fail; never break read operations
+    try:
+        for s in sites:
+            try:
+                crud.update_site_usage(db, s.id)
+            except Exception:
+                pass  # silently fail; never break read operations
+    except Exception:
+        pass
 
     platform_icons = [get_platform_icon_svg(s.platform) for s in sites]
     
