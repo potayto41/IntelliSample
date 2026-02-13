@@ -95,6 +95,9 @@ def _get_search_results(db, q: str, page: int):
         current_page = raw_page
         has_previous = current_page > 1
         has_next = current_page < total_pages and total_results > PAGE_SIZE
+        # Debug: Log heat stamp data pipeline
+        if sites:
+            logger.debug(f"Search query '{q}' returned {len(sites)} sites; first site heat_score={sites[0].heat_score}")
     else:
         current_page = 1
         sites = []
@@ -115,7 +118,7 @@ def _get_search_results(db, q: str, page: int):
 
     platform_icons = [get_platform_icon_svg(s.platform) for s in sites]
     
-    # Prepare site data for frontend: hide tags, expose last_used_at
+    # Prepare site data for frontend: include heat stamp fields
     sites_data = []
     for site in sites:
         site_dict = {
@@ -127,6 +130,7 @@ def _get_search_results(db, q: str, page: int):
             "industries": site.industries or [],
             "colors": site.colors or {},
             "last_used_at": site.last_used_at.isoformat() if site.last_used_at else None,
+            "heat_score": float(site.heat_score) if site.heat_score is not None else 0.0,
         }
         sites_data.append(site_dict)
     

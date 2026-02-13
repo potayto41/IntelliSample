@@ -11,7 +11,7 @@
                         <th>Website</th>
                         <th>Platform</th>
                         <th>Industry</th>
-                        <th>Status</th>
+                        <th>Heat Stamp</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -34,17 +34,22 @@
                                 </span>
                             </td>
                             <td>{{ site.industry or '—' }}</td>
-                            <td class="cell-tags">
-                                {% if site.tags %}
-                                    {% for tag in site.tags.split(',') %}
-                                        {% set trimmed = tag.strip() %}
-                                        {% if trimmed %}
-                                            <span class="tag-pill">{{ trimmed }}</span>
-                                        {% endif %}
-                                    {% endfor %}
-                                {% else %}
-                                    <span class="muted">No tags</span>
-                                {% endif %}
+                            <td class="cell-heat-stamp">
+                                <script type="text/javascript">
+                                    (function() {
+                                        function getHeatLevel(score) {
+                                            if (!score) return { label: '❄️ COLD', title: 'Not yet popular' };
+                                            score = parseFloat(score);
+                                            if (score >= 0.8) return { label: '🔥 HOT', title: 'Very popular' };
+                                            if (score >= 0.4) return { label: '🌤️ WARM', title: 'Gaining popularity' };
+                                            return { label: '❄️ COLD', title: 'Low popularity' };
+                                        }
+                                        var heatScore = {{ site.heat_score | tojson }};
+                                        var level = getHeatLevel(heatScore);
+                                        document.write('<span class="heat-badge" title="' + level.title + '">' + level.label + '</span>');
+                                    })();
+                                </script>
+                                <noscript><span class="muted">—</span></noscript>
                             </td>
                         </tr>
                         {% endfor %}
