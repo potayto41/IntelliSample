@@ -607,6 +607,22 @@ th {
     border: 1px solid rgba(100, 217, 255, 0.2);
     white-space: nowrap;
     cursor: help;
+    letter-spacing: 0.02em;
+}
+
+.heat-badge--hot {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.heat-badge--warm {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.3);
+}
+
+.heat-badge--cold {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.3);
 }
 
 .muted {
