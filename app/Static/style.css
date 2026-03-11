@@ -977,3 +977,53 @@ th {
         transition-duration: 0.001ms !important;
     }
 }
+
+/* Add-site feedback + recent site list */
+.notification {
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+}
+
+.notification--success {
+    color: #7df5af;
+    border-color: rgba(125, 245, 175, 0.45);
+    background: rgba(125, 245, 175, 0.12);
+}
+
+.notification--error {
+    color: #ff9b9b;
+    border-color: rgba(255, 155, 155, 0.45);
+    background: rgba(255, 155, 155, 0.12);
+}
+
+.recent-sites-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.recent-sites-list li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.375rem;
+    background: #2a2a31;
+}
+
+.recent-site-url {
+    color: #b8e6ff;
+    word-break: break-all;
+}
+
+.recent-site-meta,
+.recent-sites-empty {
+    color: #a0a0a0;
+    font-size: 0.85rem;
+}

@@ -28,34 +28,90 @@ function hideUploadProgressBar() {
     if (bar) bar.style.display = 'none';
 }
 
+// Manual add-site state container keeps timer and result list wiring in one place.
+const addSiteState = {
+    notificationTimer: null,
+};
+
+function showAddSiteNotification(message, type = 'success') {
+    const resultDiv = document.getElementById('add-site-result');
+    if (!resultDiv) return;
+
+    if (addSiteState.notificationTimer) {
+        clearTimeout(addSiteState.notificationTimer);
+    }
+
+    const typeClass = type === 'success' ? 'notification--success' : 'notification--error';
+    resultDiv.innerHTML = `<div class="notification ${typeClass}">${message}</div>`;
+
+    // Product requirement: auto-dismiss after 3 seconds.
+    addSiteState.notificationTimer = setTimeout(() => {
+        resultDiv.innerHTML = '';
+    }, 3000);
+}
+
+function renderRecentSites(sites) {
+    const list = document.getElementById('recent-sites-list');
+    if (!list) return;
+
+    if (!sites || sites.length === 0) {
+        list.innerHTML = '<li class="recent-sites-empty">No sites yet.</li>';
+        return;
+    }
+
+    list.innerHTML = sites.map((site) => {
+        const platform = site.platform || 'Unknown platform';
+        const industry = site.industry || 'Unknown industry';
+        return `<li><span class="recent-site-url">${site.website_url}</span><span class="recent-site-meta">${platform} • ${industry}</span></li>`;
+    }).join('');
+}
+
+function refreshRecentSites() {
+    fetch('/api/sites/recent?limit=10')
+        .then((response) => response.json())
+        .then((data) => renderRecentSites(data.sites || []))
+        .catch(() => {
+            // Keep UX resilient: failing to refresh list should not block add-site success flow.
+        });
+}
+
 // Handle manual add site form
 function handleAddSiteForm() {
     const form = document.querySelector('.add-form');
     if (!form) return;
-    const resultDiv = document.getElementById('add-site-result');
+
     form.onsubmit = function(e) {
         e.preventDefault();
         const formData = new FormData(form);
         const submitBtn = form.querySelector('button[type="submit"]');
         submitBtn.disabled = true;
         submitBtn.textContent = 'Adding...';
-        resultDiv.innerHTML = '';
 
         fetch('/add-site', {
             method: 'POST',
             body: formData
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                resultDiv.innerHTML = `<div style="color: green; padding: 1rem; border: 1px solid green; border-radius: 4px;">✅ ${data.message}</div>`;
+        .then(async (response) => {
+            const data = await response.json();
+            return { ok: response.ok, status: response.status, data };
+        })
+        .then(({ ok, status, data }) => {
+            if (ok && data.status === 'success') {
+                showAddSiteNotification('Site added successfully.', 'success');
                 form.reset();
-            } else {
-                resultDiv.innerHTML = `<div style="color: red; padding: 1rem; border: 1px solid red; border-radius: 4px;">❌ ${data.error}</div>`;
+                refreshRecentSites();
+                return;
             }
+
+            if (status === 409) {
+                showAddSiteNotification(data.error || 'Site already exists.', 'error');
+                return;
+            }
+
+            showAddSiteNotification(data.error || 'Unable to add site.', 'error');
         })
         .catch(error => {
-            resultDiv.innerHTML = `<div style="color: red; padding: 1rem; border: 1px solid red; border-radius: 4px;">❌ Network error: ${error.message}</div>`;
+            showAddSiteNotification(`Network error: ${error.message}`, 'error');
         })
         .finally(() => {
             submitBtn.disabled = false;
@@ -67,6 +123,7 @@ function handleAddSiteForm() {
 // Attach to CSV upload form
 window.addEventListener('DOMContentLoaded', function() {
     handleAddSiteForm();
+    refreshRecentSites();
 
     const form = document.querySelector('.upload-form');
     if (!form) return;

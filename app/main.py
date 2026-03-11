@@ -429,6 +429,18 @@ async def add_site(request: Request, website_url: str = Form(...), db: Session =
             status_code=400,
         )
 
+    # Avoid re-enriching rows that are already present; this gives users clear feedback
+    # and prevents accidental updates from duplicate submissions.
+    existing_site = db.query(Site).filter(Site.website_url == url).first()
+    if existing_site:
+        return JSONResponse(
+            {
+                "status": "error",
+                "error": "Site already exists.",
+            },
+            status_code=409,
+        )
+
     try:
         success, error_msg, result = enrich_and_persist(db, url)
         if success and result:
@@ -436,7 +448,7 @@ async def add_site(request: Request, website_url: str = Form(...), db: Session =
             return JSONResponse(
                 {
                     "status": "success",
-                    "message": f"Site {url} added successfully",
+                    "message": "Site added successfully.",
                     "site": result.to_dict(),
                 },
                 status_code=201,
@@ -460,6 +472,37 @@ async def add_site(request: Request, website_url: str = Form(...), db: Session =
             status_code=500,
         )
     # DB session closed by dependency
+
+
+@app.get("/api/sites/recent")
+def recent_sites(limit: int = 10, db: Session = Depends(get_db)):
+    """
+    Return recently created sites for lightweight UI refreshes.
+
+    The Add Site page uses this endpoint to reflect inserts immediately
+    after enrichment and DB persistence complete.
+    """
+    clamped_limit = max(1, min(limit, 50))
+    sites = (
+        db.query(Site)
+        .order_by(Site.id.desc())
+        .limit(clamped_limit)
+        .all()
+    )
+
+    return JSONResponse(
+        {
+            "sites": [
+                {
+                    "id": site.id,
+                    "website_url": site.website_url,
+                    "platform": site.platform,
+                    "industry": site.industry,
+                }
+                for site in sites
+            ]
+        }
+    )
 
 
 @app.get("/health/db")

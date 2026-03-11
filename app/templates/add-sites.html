@@ -28,7 +28,7 @@
                 </p>
             </header>
 
-            <!-- Manual add form (UI only — no API wiring) -->
+            <!-- Manual add form -->
             <section class="section-card card">
                 <div class="card-header">
                     <h2>Add site manually</h2>
@@ -36,6 +36,7 @@
                         Quickly add a single site to your catalog.
                     </p>
                 </div>
+                <div id="add-site-result" aria-live="polite"></div>
                 <form class="add-form" action="#" method="post" onsubmit="return false;">
                     <div class="add-form-grid">
                         <label class="field">
@@ -55,8 +56,18 @@
                             <input type="text" name="tags" placeholder="hero video, dark mode, pricing table (comma‑separated)">
                         </label>
                     </div>
-                    <button type="submit" class="btn-primary" disabled>Add site (coming soon)</button>
+                    <button type="submit" class="btn-primary">Add site</button>
                 </form>
+            </section>
+
+            <section class="section-card card">
+                <div class="card-header">
+                    <h2>Recently added sites</h2>
+                    <p class="card-subtitle">This list auto-refreshes after a successful add.</p>
+                </div>
+                <ul id="recent-sites-list" class="recent-sites-list">
+                    <li class="recent-sites-empty">No sites yet.</li>
+                </ul>
             </section>
 
             <!-- Bulk upload (UI only — no API wiring) -->
