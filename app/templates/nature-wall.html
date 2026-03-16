@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SampleForge — Nature Wall</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="app-topbar">
+        <div class="app-topbar-inner">
+            <a href="/" class="app-topbar-logo">SampleForge<span style="font-style: italic; font-size: 0.65em; font-weight: 400; opacity: 0.9;">powered by SampleGraph Engine</span></a>
+            <nav class="app-nav">
+                <a href="/" class="app-nav-link">Browse</a>
+                <a href="/add-sites" class="app-nav-link">Add Sites</a>
+                <a href="/nature-wall" class="app-nav-link app-nav-link-active">Portal</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="container container--wide">
+            <header class="page-header">
+                <h1 class="page-title">Nature Wall</h1>
+                <p class="page-subtitle">A visual wall of nature and science headlines, refreshed every hour.</p>
+            </header>
+
+            <section class="section-card card">
+                <div id="nature-wall-status" class="nature-wall-status">Loading articles...</div>
+                <div id="nature-wall-grid" class="nature-wall-grid" aria-live="polite"></div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        (function () {
+            const grid = document.getElementById('nature-wall-grid');
+            const status = document.getElementById('nature-wall-status');
+            const tileSizes = ['small', 'medium', 'large'];
+
+            function tileSizeFor(index) {
+                return tileSizes[index % tileSizes.length];
+            }
+
+            function renderArticles(articles) {
+                grid.innerHTML = '';
+
+                if (!articles || articles.length === 0) {
+                    status.textContent = 'No image-based articles available right now. Please check back soon.';
+                    return;
+                }
+
+                status.textContent = `Showing ${articles.length} articles`;
+
+                articles.forEach((article, index) => {
+                    const link = document.createElement('a');
+                    link.className = `nature-tile nature-tile--${tileSizeFor(index)}`;
+                    link.href = article.url;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+
+                    const image = document.createElement('img');
+                    image.className = 'nature-tile-image';
+                    image.src = article.image;
+                    image.alt = article.title || 'Nature article image';
+                    image.loading = 'lazy';
+
+                    const overlay = document.createElement('div');
+                    overlay.className = 'nature-tile-overlay';
+
+                    const source = document.createElement('span');
+                    source.className = 'nature-tile-source';
+                    source.textContent = article.source || 'Unknown source';
+
+                    const title = document.createElement('h3');
+                    title.className = 'nature-tile-title';
+                    title.textContent = article.title || 'Untitled article';
+
+                    overlay.appendChild(source);
+                    overlay.appendChild(title);
+                    link.appendChild(image);
+                    link.appendChild(overlay);
+                    grid.appendChild(link);
+                });
+            }
+
+            fetch('/api/nature-news')
+                .then((response) => response.json())
+                .then((data) => renderArticles(data.articles || []))
+                .catch(() => {
+                    status.textContent = 'Unable to load news right now. Please try again later.';
+                });
+        })();
+    </script>
+</body>
+</html>

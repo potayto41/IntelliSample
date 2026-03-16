@@ -12,6 +12,7 @@ from . import crud
 from .enrichment import enrich_and_persist
 from .write_safety import add_site_limiter, upload_csv_limiter, validate_csv_upload, get_client_ip
 from .platform_icons import get_platform_icon_svg
+from .news_portal import news_cache, start_news_scheduler, stop_news_scheduler
 import csv
 import io
 import json
@@ -75,6 +76,16 @@ async def startup_event():
         logger.error(f"Database schema initialization failed: {e}")
         # Don't crash the app, but log the error
         pass
+    finally:
+        # Nature Wall is in-memory and independent from DB; always start scheduler.
+        start_news_scheduler()
+
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop background schedulers gracefully."""
+    stop_news_scheduler()
 
 def _get_search_results(db, q: str, page: int):
     """
@@ -503,6 +514,18 @@ def recent_sites(limit: int = 10, db: Session = Depends(get_db)):
             ]
         }
     )
+
+
+@app.get("/nature-wall", response_class=HTMLResponse)
+def nature_wall_page(request: Request):
+    """Public visual news portal page."""
+    return templates.TemplateResponse("nature-wall.html", {"request": request})
+
+
+@app.get("/api/nature-news")
+def nature_news():
+    """Return cached nature/science articles for Nature Wall."""
+    return JSONResponse({"articles": news_cache})
 
 
 @app.get("/health/db")
