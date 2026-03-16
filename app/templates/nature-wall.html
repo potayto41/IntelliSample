@@ -38,8 +38,8 @@
             const status = document.getElementById('nature-wall-status');
             const tileSizes = ['small', 'medium', 'large'];
 
-            function tileSizeFor(index) {
-                return tileSizes[index % tileSizes.length];
+            function randomTileSize() {
+                return tileSizes[Math.floor(Math.random() * tileSizes.length)];
             }
 
             function renderArticles(articles) {
@@ -54,10 +54,11 @@
 
                 articles.forEach((article, index) => {
                     const link = document.createElement('a');
-                    link.className = `nature-tile nature-tile--${tileSizeFor(index)}`;
+                    link.className = `nature-tile nature-tile--${randomTileSize()}`;
                     link.href = article.url;
                     link.target = '_blank';
                     link.rel = 'noopener noreferrer';
+                    link.style.animationDelay = `${index * 65}ms`;
 
                     const image = document.createElement('img');
                     image.className = 'nature-tile-image';
@@ -84,12 +85,22 @@
                 });
             }
 
-            fetch('/api/nature-news')
-                .then((response) => response.json())
-                .then((data) => renderArticles(data.articles || []))
-                .catch(() => {
-                    status.textContent = 'Unable to load news right now. Please try again later.';
-                });
+            function refreshNews() {
+                fetch('/api/nature-news')
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error('failed to fetch');
+                        }
+                        return response.json();
+                    })
+                    .then((data) => renderArticles(data.articles || []))
+                    .catch(() => {
+                        status.textContent = 'Unable to load news right now. Please try again later.';
+                    });
+            }
+
+            refreshNews();
+            setInterval(refreshNews, 3600000);
         })();
     </script>
 </body>

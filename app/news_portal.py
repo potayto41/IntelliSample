@@ -15,9 +15,9 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 FEEDS = [
-    "https://www.nationalgeographic.com/animals/feed/",
-    "http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://www.nasa.gov/rss/dyn/breaking_news.rss",
+    "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
 ]
 
 MAX_ARTICLES = 30
@@ -75,14 +75,18 @@ def fetch_articles() -> None:
     global news_cache
     started = time.time()
     collected: list[dict[str, str]] = []
+    skipped_without_images = 0
+    total_entries_seen = 0
 
     for feed_url in FEEDS:
         try:
             parsed = feedparser.parse(feed_url)
             source = parsed.feed.get("title", feed_url)
             for entry in parsed.entries:
+                total_entries_seen += 1
                 image_url = _extract_image(entry)
                 if not image_url:
+                    skipped_without_images += 1
                     continue
 
                 link = entry.get("link")
@@ -104,8 +108,13 @@ def fetch_articles() -> None:
 
     # Keep deterministic recent-first ordering when publish date is available.
     collected.sort(key=lambda item: item.get("published", ""), reverse=True)
-    news_cache = collected[:MAX_ARTICLES]
-    logger.info("Nature Wall cache refreshed: %s articles in %.2fs", len(news_cache), time.time() - started)
+    news_cache[:] = collected[:MAX_ARTICLES]
+
+    logger.info("Fetched %s feeds", len(FEEDS))
+    logger.info("Found %s articles", total_entries_seen)
+    logger.info("Skipped %s without images", skipped_without_images)
+    logger.info("Returning %s articles", len(news_cache))
+    logger.info("Nature Wall cache refreshed in %.2fs", time.time() - started)
 
 
 def start_news_scheduler() -> None:
