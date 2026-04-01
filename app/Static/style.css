@@ -1120,3 +1120,73 @@ th {
     from { opacity: 0; transform: translateY(16px); }
     to { opacity: 1; transform: translateY(0); }
 }
+
+/* Music Wall */
+.music-wall-body {
+    background: #0b0f14;
+    color: #ffffff;
+}
+
+.music-wall-container {
+    background: #111823;
+}
+
+.music-tile {
+    border: 0;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+}
+
+.music-tile-play {
+    display: inline-block;
+    margin-top: 0.45rem;
+    padding: 0.22rem 0.45rem;
+    border-radius: 0.25rem;
+    background: rgba(16, 185, 129, 0.2);
+    color: #a7f3d0;
+    font-size: 0.8rem;
+}
+
+.music-tile--playing {
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.95), 0 0 22px rgba(16, 185, 129, 0.5);
+}
+
+.music-mini-player {
+    position: fixed;
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 50;
+    background: rgba(8, 12, 18, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.6rem;
+    padding: 0.75rem 1rem;
+    backdrop-filter: blur(4px);
+}
+
+.music-mini-player__title {
+    font-weight: 600;
+    margin-bottom: 0.55rem;
+}
+
+.music-mini-player__controls {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.music-mini-player__progress-wrap {
+    flex: 1;
+    height: 0.4rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    overflow: hidden;
+}
+
+.music-mini-player__progress {
+    width: 0;
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #2dd4bf);
+    transition: width 0.35s ease;
+}

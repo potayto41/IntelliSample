@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SampleForge — Music Wall</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="music-wall-body">
+    <header class="app-topbar">
+        <div class="app-topbar-inner">
+            <a href="/" class="app-topbar-logo">SampleForge<span style="font-style: italic; font-size: 0.65em; font-weight: 400; opacity: 0.9;">powered by SampleGraph Engine</span></a>
+            <nav class="app-nav">
+                <a href="/" class="app-nav-link">Browse</a>
+                <a href="/add-sites" class="app-nav-link">Add Sites</a>
+                <a href="/nature-wall" class="app-nav-link">Portal</a>
+                <a href="/music-wall" class="app-nav-link app-nav-link-active">Music</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="container container--wide music-wall-container">
+            <header class="page-header">
+                <h1 class="page-title">Music Wall</h1>
+                <p class="page-subtitle">Click any tile to play YouTube audio in the background.</p>
+            </header>
+
+            <section class="section-card card">
+                <div id="music-wall-status" class="nature-wall-status">Loading songs...</div>
+                <div id="music-wall-grid" class="nature-wall-grid" aria-live="polite"></div>
+            </section>
+        </div>
+    </main>
+
+    <div id="player" style="display:none;"></div>
+
+    <div class="music-mini-player" id="music-mini-player">
+        <div class="music-mini-player__title" id="mini-player-title">No track selected</div>
+        <div class="music-mini-player__controls">
+            <button id="mini-player-toggle" class="btn-primary" type="button">Play</button>
+            <div class="music-mini-player__progress-wrap">
+                <div class="music-mini-player__progress" id="mini-player-progress"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script>
+        let player;
+        let currentSong = null;
+        let isPlaying = false;
+
+        const grid = document.getElementById('music-wall-grid');
+        const status = document.getElementById('music-wall-status');
+        const miniTitle = document.getElementById('mini-player-title');
+        const miniToggle = document.getElementById('mini-player-toggle');
+        const miniProgress = document.getElementById('mini-player-progress');
+        const sizes = ['small', 'medium', 'large'];
+
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player('player', {
+                height: '0',
+                width: '0',
+                videoId: '',
+                playerVars: {
+                    autoplay: 0,
+                    controls: 0
+                },
+                events: {
+                    onStateChange: function (event) {
+                        isPlaying = event.data === YT.PlayerState.PLAYING;
+                        miniToggle.textContent = isPlaying ? 'Pause' : 'Play';
+                    }
+                }
+            });
+        }
+        window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
+
+        function randomSize() {
+            return sizes[Math.floor(Math.random() * sizes.length)];
+        }
+
+        function setPlayingTile(videoId) {
+            document.querySelectorAll('.music-tile--playing').forEach((tile) => tile.classList.remove('music-tile--playing'));
+            const activeTile = document.querySelector(`[data-video-id="${videoId}"]`);
+            if (activeTile) {
+                activeTile.classList.add('music-tile--playing');
+            }
+        }
+
+        function playSong(videoId, title) {
+            if (!player || !player.loadVideoById) {
+                return;
+            }
+            currentSong = { videoId, title };
+            miniTitle.textContent = title;
+            player.loadVideoById(videoId);
+            player.playVideo();
+            setPlayingTile(videoId);
+        }
+
+        function pauseSong() {
+            if (player && player.pauseVideo) {
+                player.pauseVideo();
+            }
+        }
+
+        miniToggle.addEventListener('click', function () {
+            if (!player || !currentSong) {
+                return;
+            }
+            if (isPlaying) {
+                pauseSong();
+            } else {
+                player.playVideo();
+            }
+        });
+
+        function renderSongs(songs) {
+            grid.innerHTML = '';
+
+            if (!songs || songs.length === 0) {
+                status.textContent = 'No songs available right now.';
+                return;
+            }
+
+            status.textContent = `Showing ${songs.length} tracks`;
+
+            songs.forEach((song, index) => {
+                const tile = document.createElement('button');
+                tile.type = 'button';
+                tile.className = `nature-tile music-tile nature-tile--${randomSize()}`;
+                tile.style.animationDelay = `${index * 75}ms`;
+                tile.dataset.videoId = song.video_id;
+
+                const image = document.createElement('img');
+                image.className = 'nature-tile-image';
+                image.src = song.thumbnail;
+                image.alt = song.title;
+                image.loading = 'lazy';
+
+                const overlay = document.createElement('div');
+                overlay.className = 'nature-tile-overlay';
+
+                const source = document.createElement('span');
+                source.className = 'nature-tile-source';
+                source.textContent = 'YouTube Audio';
+
+                const title = document.createElement('h3');
+                title.className = 'nature-tile-title';
+                title.textContent = song.title;
+
+                const play = document.createElement('span');
+                play.className = 'music-tile-play';
+                play.textContent = '▶ Play';
+
+                overlay.appendChild(source);
+                overlay.appendChild(title);
+                overlay.appendChild(play);
+                tile.appendChild(image);
+                tile.appendChild(overlay);
+                tile.addEventListener('click', function () {
+                    playSong(song.video_id, song.title);
+                });
+
+                grid.appendChild(tile);
+            });
+        }
+
+        function refreshMusic() {
+            fetch('/api/music')
+                .then((response) => response.json())
+                .then((data) => renderSongs(data.songs || []))
+                .catch(() => {
+                    status.textContent = 'Unable to load songs right now.';
+                });
+        }
+
+        setInterval(function () {
+            if (player && player.getCurrentTime && player.getDuration) {
+                const current = player.getCurrentTime();
+                const duration = player.getDuration();
+                if (duration > 0) {
+                    miniProgress.style.width = `${Math.min(100, (current / duration) * 100)}%`;
+                }
+            }
+        }, 1000);
+
+        refreshMusic();
+    </script>
+</body>
+</html>

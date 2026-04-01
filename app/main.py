@@ -13,6 +13,7 @@ from .enrichment import enrich_and_persist
 from .write_safety import add_site_limiter, upload_csv_limiter, validate_csv_upload, get_client_ip
 from .platform_icons import get_platform_icon_svg
 from .news_portal import news_cache, start_news_scheduler, stop_news_scheduler
+from .music_portal import playlist
 import csv
 import io
 import json
@@ -526,6 +527,18 @@ def nature_wall_page(request: Request):
 def nature_news():
     """Return cached nature/science articles for Nature Wall."""
     return JSONResponse({"articles": news_cache})
+
+
+@app.get("/music-wall", response_class=HTMLResponse)
+def music_wall_page(request: Request):
+    """Public music portal page with YouTube-backed audio playback."""
+    return templates.TemplateResponse("music-wall.html", {"request": request})
+
+
+@app.get("/api/music")
+def music_api():
+    """Return static in-memory playlist for Music Wall."""
+    return JSONResponse({"songs": playlist})
 
 
 @app.get("/health/db")
