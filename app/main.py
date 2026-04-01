@@ -164,15 +164,16 @@ def _get_search_results(db, q: str, page: int):
 def index(request: Request, q: str = "", page: int = 1, db: Session = Depends(get_db)):
     ctx = _get_search_results(db, q, page)
     return templates.TemplateResponse(
-        "index.html",
-        {"request": request, **ctx},
+        request=request,
+        name="index.html",
+        context={"request": request, **ctx},
     )
 
 
 @app.get("/add-sites", response_class=HTMLResponse)
 def add_sites_page(request: Request):
     """Add Sites page (UI only). No upload logic wired."""
-    return templates.TemplateResponse("add-sites.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="add-sites.html", context={"request": request})
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -180,8 +181,9 @@ def search(request: Request, q: str = "", page: int = 1, db: Session = Depends(g
     """Returns only the results section HTML (partial) for AJAX replacement."""
     ctx = _get_search_results(db, q, page)
     return templates.TemplateResponse(
-        "results.html",
-        {"request": request, **ctx},
+        request=request,
+        name="results.html",
+        context={"request": request, **ctx},
     )
 
 
@@ -520,7 +522,7 @@ def recent_sites(limit: int = 10, db: Session = Depends(get_db)):
 @app.get("/nature-wall", response_class=HTMLResponse)
 def nature_wall_page(request: Request):
     """Public visual news portal page."""
-    return templates.TemplateResponse("nature-wall.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="nature-wall.html", context={"request": request})
 
 
 @app.get("/api/nature-news")
@@ -532,7 +534,7 @@ def nature_news():
 @app.get("/music-wall", response_class=HTMLResponse)
 def music_wall_page(request: Request):
     """Public music portal page with YouTube-backed audio playback."""
-    return templates.TemplateResponse("music-wall.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="music-wall.html", context={"request": request})
 
 
 @app.get("/api/music")
