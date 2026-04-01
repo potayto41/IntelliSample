@@ -1280,3 +1280,35 @@ th {
 .music-row-scroll .nature-tile--small { min-height: 10rem; }
 .music-row-scroll .nature-tile--medium { min-height: 12rem; }
 .music-row-scroll .nature-tile--large { min-height: 14rem; }
+
+.music-section-title-button {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    padding: 0;
+}
+
+.music-inline-title-list {
+    margin: 0.55rem 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+}
+
+.music-inline-title-btn {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: #0d141e;
+    color: #e5e7eb;
+    border-radius: 999px;
+    padding: 0.3rem 0.65rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.music-inline-title-btn:hover,
+.music-section-title-button:hover {
+    color: #93c5fd;
+}

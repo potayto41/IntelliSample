@@ -13,7 +13,7 @@ from .enrichment import enrich_and_persist
 from .write_safety import add_site_limiter, upload_csv_limiter, validate_csv_upload, get_client_ip
 from .platform_icons import get_platform_icon_svg
 from .news_portal import news_cache, start_news_scheduler, stop_news_scheduler
-from .music_portal import HOME_QUERIES, fetch_from_piped, normalize_piped_response
+from .music_portal import HOME_QUERIES, fallback_search, fetch_from_piped, normalize_piped_response
 import csv
 import io
 import json
@@ -543,7 +543,10 @@ async def music_search(q: str = ""):
     raw = await fetch_from_piped(q)
     normalized = normalize_piped_response(raw)
     if not normalized["songs"]:
-        return JSONResponse({"songs": [], "error": "Music service temporarily unavailable"})
+        fallback = fallback_search(q)
+        if not fallback["songs"]:
+            return JSONResponse({"songs": [], "error": "Music service temporarily unavailable"})
+        return JSONResponse({**fallback, "fallback": True})
     return JSONResponse(normalized)
 
 
@@ -554,7 +557,8 @@ async def music_home():
     for title, query in HOME_QUERIES:
         raw = await fetch_from_piped(query)
         normalized = normalize_piped_response(raw)
-        sections.append({"title": title, "songs": normalized["songs"]})
+        songs = normalized["songs"] if normalized["songs"] else fallback_search(query)["songs"]
+        sections.append({"title": title, "query": query, "songs": songs})
     return JSONResponse({"sections": sections})
 
 

@@ -140,21 +140,37 @@
         return tile;
     }
 
-    function renderSection(target, title, songs) {
+    function renderSection(target, title, songs, query) {
         const wrapper = document.createElement('section');
         wrapper.className = 'music-section';
 
-        const heading = document.createElement('h3');
-        heading.className = 'music-section-title';
+        const heading = document.createElement('button');
+        heading.type = 'button';
+        heading.className = 'music-section-title music-section-title-button';
         heading.textContent = title;
+        heading.addEventListener('click', function () { if (query) { searchInput.value = query; runSearch(query); } });
 
         const row = document.createElement('div');
         row.className = 'music-row-scroll';
 
         songs.forEach((song) => row.appendChild(makeTile(song)));
 
+        const titleList = document.createElement('ul');
+        titleList.className = 'music-inline-title-list';
+        songs.forEach((song) => {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'music-inline-title-btn';
+            btn.textContent = song.title || 'Untitled';
+            btn.addEventListener('click', function () { playSong(song); });
+            li.appendChild(btn);
+            titleList.appendChild(li);
+        });
+
         wrapper.appendChild(heading);
         wrapper.appendChild(row);
+        wrapper.appendChild(titleList);
         target.appendChild(wrapper);
     }
 
@@ -172,7 +188,7 @@
                 return;
             }
 
-            sections.forEach((section) => renderSection(homeSections, section.title, section.songs || []));
+            sections.forEach((section) => renderSection(homeSections, section.title, section.songs || [], section.query || ""));
             status.textContent = 'Browse by section or search above.';
         } catch (_) {
             status.textContent = 'Music service temporarily unavailable';
@@ -201,7 +217,7 @@
                 return;
             }
 
-            renderSection(searchResults, `Results for "${q}"`, songs);
+            renderSection(searchResults, `Results for "${q}"`, songs, q);
             status.textContent = `Found ${songs.length} result(s).`;
         } catch (_) {
             status.textContent = 'Music service temporarily unavailable';
