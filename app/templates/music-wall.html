@@ -23,12 +23,18 @@
         <div class="container container--wide music-wall-container">
             <header class="page-header">
                 <h1 class="page-title">Music Wall</h1>
-                <p class="page-subtitle">Click any tile to play YouTube audio in the background.</p>
+                <p class="page-subtitle">Search by title, then play from tiles or the title-only list.</p>
             </header>
 
             <section class="section-card card">
+                <div class="music-search-row">
+                    <input id="music-search" class="music-search" type="search" placeholder="Search titles..." aria-label="Search music titles">
+                </div>
                 <div id="music-wall-status" class="nature-wall-status">Loading songs...</div>
                 <div id="music-wall-grid" class="nature-wall-grid" aria-live="polite"></div>
+
+                <h3 class="music-title-list-heading">Titles</h3>
+                <ul id="music-title-list" class="music-title-list"></ul>
             </section>
         </div>
     </main>
@@ -39,10 +45,15 @@
     <div class="music-mini-player" id="music-mini-player">
         <div class="music-mini-player__title" id="mini-player-title">No track selected</div>
         <div class="music-mini-player__controls">
+            <button id="mini-player-prev" class="btn-primary" type="button">Prev</button>
             <button id="mini-player-toggle" class="btn-primary" type="button">Play</button>
-            <div class="music-mini-player__progress-wrap">
-                <div class="music-mini-player__progress" id="mini-player-progress"></div>
-            </div>
+            <button id="mini-player-next" class="btn-primary" type="button">Next</button>
+            <label class="music-volume-wrap">Vol <input id="mini-player-volume" type="range" min="0" max="100" value="70"></label>
+        </div>
+        <div class="music-mini-player__timeline">
+            <span id="mini-time-current">0:00</span>
+            <input id="mini-player-seek" type="range" min="0" max="100" value="0">
+            <span id="mini-time-total">0:00</span>
         </div>
     </div>
 
@@ -50,27 +61,40 @@
     <script>
         let player;
         let currentSong = null;
+        let currentIndex = -1;
         let isPlaying = false;
         let useFallbackAudio = false;
+        let allSongs = [];
+        let filteredSongs = [];
 
         const fallbackAudio = document.getElementById('fallback-audio');
-
         const grid = document.getElementById('music-wall-grid');
+        const titleList = document.getElementById('music-title-list');
         const status = document.getElementById('music-wall-status');
+        const searchInput = document.getElementById('music-search');
         const miniTitle = document.getElementById('mini-player-title');
         const miniToggle = document.getElementById('mini-player-toggle');
-        const miniProgress = document.getElementById('mini-player-progress');
+        const miniPrev = document.getElementById('mini-player-prev');
+        const miniNext = document.getElementById('mini-player-next');
+        const miniSeek = document.getElementById('mini-player-seek');
+        const miniVolume = document.getElementById('mini-player-volume');
+        const miniTimeCurrent = document.getElementById('mini-time-current');
+        const miniTimeTotal = document.getElementById('mini-time-total');
         const sizes = ['small', 'medium', 'large'];
+
+        function formatTime(seconds) {
+            const safe = Math.max(0, Math.floor(seconds || 0));
+            const m = Math.floor(safe / 60);
+            const s = String(safe % 60).padStart(2, '0');
+            return `${m}:${s}`;
+        }
 
         function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
                 height: '0',
                 width: '0',
                 videoId: '',
-                playerVars: {
-                    autoplay: 0,
-                    controls: 0
-                },
+                playerVars: { autoplay: 0, controls: 0 },
                 events: {
                     onStateChange: function (event) {
                         isPlaying = event.data === YT.PlayerState.PLAYING;
@@ -81,7 +105,6 @@
         }
         window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
-        // If YouTube API is blocked in deployment, switch to open-audio fallback.
         setTimeout(function () {
             if (!player || !player.loadVideoById) {
                 useFallbackAudio = true;
@@ -89,26 +112,31 @@
             }
         }, 4000);
 
-        function randomSize() {
-            return sizes[Math.floor(Math.random() * sizes.length)];
-        }
+        function randomSize() { return sizes[Math.floor(Math.random() * sizes.length)]; }
 
         function setPlayingTile(videoId) {
             document.querySelectorAll('.music-tile--playing').forEach((tile) => tile.classList.remove('music-tile--playing'));
             const activeTile = document.querySelector(`[data-video-id="${videoId}"]`);
-            if (activeTile) {
-                activeTile.classList.add('music-tile--playing');
-            }
+            if (activeTile) activeTile.classList.add('music-tile--playing');
         }
 
-        function playSong(videoId, title, audioUrl) {
-            currentSong = { videoId, title, audioUrl };
-            miniTitle.textContent = title;
-            setPlayingTile(videoId);
+        function setPlayingTitle(videoId) {
+            document.querySelectorAll('.music-title-item--playing').forEach((item) => item.classList.remove('music-title-item--playing'));
+            const active = document.querySelector(`[data-title-video-id="${videoId}"]`);
+            if (active) active.classList.add('music-title-item--playing');
+        }
+
+        function playSong(song, indexHint) {
+            if (!song) return;
+            currentSong = song;
+            currentIndex = typeof indexHint === 'number' ? indexHint : filteredSongs.findIndex((s) => s.video_id === song.video_id);
+            miniTitle.textContent = song.title;
+            setPlayingTile(song.video_id);
+            setPlayingTitle(song.video_id);
 
             if (useFallbackAudio || !player || !player.loadVideoById) {
-                if (audioUrl) {
-                    fallbackAudio.src = audioUrl;
+                if (song.audio_url) {
+                    fallbackAudio.src = song.audio_url;
                     fallbackAudio.play();
                     isPlaying = true;
                     miniToggle.textContent = 'Pause';
@@ -116,49 +144,84 @@
                 return;
             }
 
-            player.loadVideoById(videoId);
+            player.loadVideoById(song.video_id);
             player.playVideo();
         }
 
         function pauseSong() {
             if (useFallbackAudio) {
                 fallbackAudio.pause();
-                isPlaying = false;
-                miniToggle.textContent = 'Play';
-                return;
-            }
-            if (player && player.pauseVideo) {
+            } else if (player && player.pauseVideo) {
                 player.pauseVideo();
             }
+            isPlaying = false;
+            miniToggle.textContent = 'Play';
+        }
+
+        function playNext(step) {
+            if (!filteredSongs.length) return;
+            const start = currentIndex >= 0 ? currentIndex : 0;
+            const nextIndex = (start + step + filteredSongs.length) % filteredSongs.length;
+            playSong(filteredSongs[nextIndex], nextIndex);
         }
 
         miniToggle.addEventListener('click', function () {
-            if (!currentSong) {
-                return;
-            }
+            if (!currentSong) return;
             if (isPlaying) {
                 pauseSong();
-            } else {
-                if (useFallbackAudio) {
-                    fallbackAudio.play();
-                    isPlaying = true;
-                    miniToggle.textContent = 'Pause';
-                } else {
-                    player.playVideo();
-                }
+            } else if (useFallbackAudio) {
+                fallbackAudio.play();
+                isPlaying = true;
+                miniToggle.textContent = 'Pause';
+            } else if (player && player.playVideo) {
+                player.playVideo();
             }
         });
 
-        function renderSongs(songs) {
-            grid.innerHTML = '';
+        miniPrev.addEventListener('click', function () { playNext(-1); });
+        miniNext.addEventListener('click', function () { playNext(1); });
 
-            if (!songs || songs.length === 0) {
-                status.textContent = 'No songs available right now.';
+        miniVolume.addEventListener('input', function () {
+            const value = Number(miniVolume.value) / 100;
+            fallbackAudio.volume = value;
+            if (!useFallbackAudio && player && player.setVolume) {
+                player.setVolume(Number(miniVolume.value));
+            }
+        });
+
+        miniSeek.addEventListener('input', function () {
+            const pct = Number(miniSeek.value) / 100;
+            if (useFallbackAudio) {
+                const duration = fallbackAudio.duration || 0;
+                fallbackAudio.currentTime = duration * pct;
                 return;
             }
+            if (player && player.getDuration && player.seekTo) {
+                const duration = player.getDuration() || 0;
+                player.seekTo(duration * pct, true);
+            }
+        });
 
-            status.textContent = `Showing ${songs.length} tracks`;
+        function renderTitleList(songs) {
+            titleList.innerHTML = '';
+            songs.forEach((song, idx) => {
+                const li = document.createElement('li');
+                li.className = 'music-title-item';
+                li.dataset.titleVideoId = song.video_id;
 
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'music-title-button';
+                button.textContent = song.title;
+                button.addEventListener('click', function () { playSong(song, idx); });
+
+                li.appendChild(button);
+                titleList.appendChild(li);
+            });
+        }
+
+        function renderTiles(songs) {
+            grid.innerHTML = '';
             songs.forEach((song, index) => {
                 const tile = document.createElement('button');
                 tile.type = 'button';
@@ -177,60 +240,64 @@
 
                 const source = document.createElement('span');
                 source.className = 'nature-tile-source';
-                source.textContent = 'YouTube Audio';
+                source.textContent = 'Music';
 
                 const title = document.createElement('h3');
                 title.className = 'nature-tile-title';
                 title.textContent = song.title;
 
-                const play = document.createElement('span');
-                play.className = 'music-tile-play';
-                play.textContent = '▶ Play';
-
                 overlay.appendChild(source);
                 overlay.appendChild(title);
-                overlay.appendChild(play);
                 tile.appendChild(image);
                 tile.appendChild(overlay);
-                tile.addEventListener('click', function () {
-                    playSong(song.video_id, song.title, song.audio_url);
-                });
-
+                tile.addEventListener('click', function () { playSong(song, index); });
                 grid.appendChild(tile);
             });
         }
 
+        function applyFilter() {
+            const q = (searchInput.value || '').trim().toLowerCase();
+            filteredSongs = q ? allSongs.filter((s) => (s.title || '').toLowerCase().includes(q)) : allSongs.slice();
+            status.textContent = filteredSongs.length ? `Showing ${filteredSongs.length} tracks` : 'No matching tracks found.';
+            renderTiles(filteredSongs);
+            renderTitleList(filteredSongs);
+        }
+
+        searchInput.addEventListener('input', applyFilter);
+
         fallbackAudio.addEventListener('ended', function () {
             isPlaying = false;
             miniToggle.textContent = 'Play';
+            playNext(1);
         });
 
         function refreshMusic() {
             fetch('/api/music')
                 .then((response) => response.json())
-                .then((data) => renderSongs(data.songs || []))
+                .then((data) => {
+                    allSongs = data.songs || [];
+                    applyFilter();
+                })
                 .catch(() => {
                     status.textContent = 'Unable to load songs right now.';
                 });
         }
 
         setInterval(function () {
+            let current = 0;
+            let duration = 0;
+
             if (useFallbackAudio) {
-                const duration = fallbackAudio.duration || 0;
-                const current = fallbackAudio.currentTime || 0;
-                if (duration > 0) {
-                    miniProgress.style.width = `${Math.min(100, (current / duration) * 100)}%`;
-                }
-                return;
+                current = fallbackAudio.currentTime || 0;
+                duration = fallbackAudio.duration || 0;
+            } else if (player && player.getCurrentTime && player.getDuration) {
+                current = player.getCurrentTime() || 0;
+                duration = player.getDuration() || 0;
             }
 
-            if (player && player.getCurrentTime && player.getDuration) {
-                const current = player.getCurrentTime();
-                const duration = player.getDuration();
-                if (duration > 0) {
-                    miniProgress.style.width = `${Math.min(100, (current / duration) * 100)}%`;
-                }
-            }
+            miniTimeCurrent.textContent = formatTime(current);
+            miniTimeTotal.textContent = formatTime(duration);
+            miniSeek.value = duration > 0 ? Math.min(100, (current / duration) * 100) : 0;
         }, 1000);
 
         refreshMusic();
