@@ -13,7 +13,7 @@ from .enrichment import enrich_and_persist
 from .write_safety import add_site_limiter, upload_csv_limiter, validate_csv_upload, get_client_ip
 from .platform_icons import get_platform_icon_svg
 from .news_portal import news_cache, start_news_scheduler, stop_news_scheduler
-from .music_portal import playlist
+from .music_portal import HOME_QUERIES, fetch_from_piped, normalize_piped_response
 import csv
 import io
 import json
@@ -537,10 +537,25 @@ def music_wall_page(request: Request):
     return templates.TemplateResponse(request=request, name="music-wall.html", context={"request": request})
 
 
-@app.get("/api/music")
-def music_api():
-    """Return static in-memory playlist for Music Wall."""
-    return JSONResponse({"songs": playlist})
+@app.get("/api/music/search")
+async def music_search(q: str = ""):
+    """Search songs via resilient Piped API failover."""
+    raw = await fetch_from_piped(q)
+    normalized = normalize_piped_response(raw)
+    if not normalized["songs"]:
+        return JSONResponse({"songs": [], "error": "Music service temporarily unavailable"})
+    return JSONResponse(normalized)
+
+
+@app.get("/api/music/home")
+async def music_home():
+    """Return sectioned home feed for Music Wall."""
+    sections = []
+    for title, query in HOME_QUERIES:
+        raw = await fetch_from_piped(query)
+        normalized = normalize_piped_response(raw)
+        sections.append({"title": title, "songs": normalized["songs"]})
+    return JSONResponse({"sections": sections})
 
 
 @app.get("/health/db")
