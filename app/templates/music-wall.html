@@ -34,6 +34,7 @@
     </main>
 
     <div id="player" style="display:none;"></div>
+    <audio id="fallback-audio" preload="none"></audio>
 
     <div class="music-mini-player" id="music-mini-player">
         <div class="music-mini-player__title" id="mini-player-title">No track selected</div>
@@ -50,6 +51,9 @@
         let player;
         let currentSong = null;
         let isPlaying = false;
+        let useFallbackAudio = false;
+
+        const fallbackAudio = document.getElementById('fallback-audio');
 
         const grid = document.getElementById('music-wall-grid');
         const status = document.getElementById('music-wall-status');
@@ -77,6 +81,14 @@
         }
         window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
+        // If YouTube API is blocked in deployment, switch to open-audio fallback.
+        setTimeout(function () {
+            if (!player || !player.loadVideoById) {
+                useFallbackAudio = true;
+                status.textContent = 'YouTube embed unavailable; using open audio fallback.';
+            }
+        }, 4000);
+
         function randomSize() {
             return sizes[Math.floor(Math.random() * sizes.length)];
         }
@@ -89,31 +101,51 @@
             }
         }
 
-        function playSong(videoId, title) {
-            if (!player || !player.loadVideoById) {
+        function playSong(videoId, title, audioUrl) {
+            currentSong = { videoId, title, audioUrl };
+            miniTitle.textContent = title;
+            setPlayingTile(videoId);
+
+            if (useFallbackAudio || !player || !player.loadVideoById) {
+                if (audioUrl) {
+                    fallbackAudio.src = audioUrl;
+                    fallbackAudio.play();
+                    isPlaying = true;
+                    miniToggle.textContent = 'Pause';
+                }
                 return;
             }
-            currentSong = { videoId, title };
-            miniTitle.textContent = title;
+
             player.loadVideoById(videoId);
             player.playVideo();
-            setPlayingTile(videoId);
         }
 
         function pauseSong() {
+            if (useFallbackAudio) {
+                fallbackAudio.pause();
+                isPlaying = false;
+                miniToggle.textContent = 'Play';
+                return;
+            }
             if (player && player.pauseVideo) {
                 player.pauseVideo();
             }
         }
 
         miniToggle.addEventListener('click', function () {
-            if (!player || !currentSong) {
+            if (!currentSong) {
                 return;
             }
             if (isPlaying) {
                 pauseSong();
             } else {
-                player.playVideo();
+                if (useFallbackAudio) {
+                    fallbackAudio.play();
+                    isPlaying = true;
+                    miniToggle.textContent = 'Pause';
+                } else {
+                    player.playVideo();
+                }
             }
         });
 
@@ -161,12 +193,17 @@
                 tile.appendChild(image);
                 tile.appendChild(overlay);
                 tile.addEventListener('click', function () {
-                    playSong(song.video_id, song.title);
+                    playSong(song.video_id, song.title, song.audio_url);
                 });
 
                 grid.appendChild(tile);
             });
         }
+
+        fallbackAudio.addEventListener('ended', function () {
+            isPlaying = false;
+            miniToggle.textContent = 'Play';
+        });
 
         function refreshMusic() {
             fetch('/api/music')
@@ -178,6 +215,15 @@
         }
 
         setInterval(function () {
+            if (useFallbackAudio) {
+                const duration = fallbackAudio.duration || 0;
+                const current = fallbackAudio.currentTime || 0;
+                if (duration > 0) {
+                    miniProgress.style.width = `${Math.min(100, (current / duration) * 100)}%`;
+                }
+                return;
+            }
+
             if (player && player.getCurrentTime && player.getDuration) {
                 const current = player.getCurrentTime();
                 const duration = player.getDuration();

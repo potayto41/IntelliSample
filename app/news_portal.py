@@ -8,9 +8,20 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, Optional
 
-import feedparser
-from apscheduler.schedulers.background import BackgroundScheduler
-from bs4 import BeautifulSoup
+try:
+    import feedparser
+except Exception:  # pragma: no cover - optional runtime dependency
+    feedparser = None
+
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+except Exception:  # pragma: no cover - optional runtime dependency
+    BackgroundScheduler = None
+
+try:
+    from bs4 import BeautifulSoup
+except Exception:  # pragma: no cover - optional runtime dependency
+    BeautifulSoup = None
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +61,7 @@ def _extract_image(entry: Any) -> Optional[str]:
                 return href
 
     summary_html = entry.get("summary") or entry.get("description") or ""
-    if summary_html:
+    if summary_html and BeautifulSoup is not None:
         soup = BeautifulSoup(summary_html, "html.parser")
         img = soup.find("img")
         if img and img.get("src"):
@@ -73,6 +84,11 @@ def _format_published(entry: Any) -> str:
 def fetch_articles() -> None:
     """Refresh news cache from RSS feeds. Only keeps articles with images."""
     global news_cache
+    if feedparser is None:
+        logger.warning("feedparser is unavailable; Nature Wall cache refresh skipped")
+        news_cache[:] = []
+        return
+
     started = time.time()
     collected: list[dict[str, str]] = []
     skipped_without_images = 0
@@ -120,6 +136,12 @@ def fetch_articles() -> None:
 def start_news_scheduler() -> None:
     """Initialize the scheduler and start periodic cache refresh."""
     global _scheduler
+
+    if BackgroundScheduler is None:
+        logger.warning("APScheduler is unavailable; running one-time Nature Wall refresh only")
+        fetch_articles()
+        return
+
     if _scheduler and _scheduler.running:
         return
 
