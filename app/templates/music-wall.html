@@ -37,7 +37,7 @@
     </div>
 </main>
 
-<div id="player" style="display:none;"></div>
+<audio id="music-audio-player" preload="none" style="display:none;"></audio>
 
 <div class="music-mini-player">
     <div class="music-mini-player__title" id="mini-player-title">No track selected</div>
@@ -46,13 +46,13 @@
     </div>
 </div>
 
-<script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    let player;
     let isPlaying = false;
-    let activeVideoId = null;
+    let activeTrackId = null;
+    let activeSong = null;
     let debounceTimer = null;
 
+    const audio = document.getElementById('music-audio-player');
     const searchInput = document.getElementById('music-search');
     const status = document.getElementById('music-wall-status');
     const homeSections = document.getElementById('music-home-sections');
@@ -65,55 +65,90 @@
         return sizes[Math.floor(Math.random() * sizes.length)];
     }
 
-    function onYouTubeIframeAPIReady() {
-        player = new YT.Player('player', {
-            height: '0',
-            width: '0',
-            videoId: '',
-            playerVars: { autoplay: 0, controls: 0 },
-            events: {
-                onStateChange: function (event) {
-                    isPlaying = event.data === YT.PlayerState.PLAYING;
-                    miniToggle.textContent = isPlaying ? 'Pause' : 'Play';
-                }
-            }
-        });
-    }
-    window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
+    audio.addEventListener('play', function () {
+        isPlaying = true;
+        miniToggle.textContent = 'Pause';
+        updateActiveTiles();
+    });
+
+    audio.addEventListener('pause', function () {
+        isPlaying = false;
+        miniToggle.textContent = 'Play';
+    });
+
+    audio.addEventListener('ended', function () {
+        isPlaying = false;
+        miniToggle.textContent = 'Play';
+    });
+
+    audio.addEventListener('error', function () {
+        isPlaying = false;
+        miniToggle.textContent = 'Play';
+        status.textContent = 'Could not stream this track. Try another one.';
+    });
 
     function playSong(song) {
-        if (!song || !song.video_id || !player || !player.loadVideoById) return;
-        activeVideoId = song.video_id;
-        miniTitle.textContent = `${song.title} — ${song.channel || 'Unknown channel'}`;
-        player.loadVideoById(song.video_id);
-        player.playVideo();
+        if (!song || !song.id || !song.stream_url) return;
+
+        const isSameTrack = activeTrackId && activeTrackId === song.id;
+        activeSong = song;
+        activeTrackId = song.id;
+        miniTitle.textContent = `${song.title} - ${song.artist || 'Unknown artist'}`;
+
+        if (!isSameTrack) {
+            audio.src = song.stream_url;
+            audio.load();
+        }
+
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(function () {
+                status.textContent = 'Playback blocked by browser. Click Play again.';
+            });
+        }
+
         updateActiveTiles();
     }
 
     function updateActiveTiles() {
         document.querySelectorAll('.music-tile--playing').forEach((tile) => tile.classList.remove('music-tile--playing'));
-        if (!activeVideoId) return;
-        document.querySelectorAll(`[data-video-id="${activeVideoId}"]`).forEach((tile) => tile.classList.add('music-tile--playing'));
+        if (!activeTrackId) return;
+        document.querySelectorAll(`[data-track-id="${activeTrackId}"]`).forEach((tile) => tile.classList.add('music-tile--playing'));
     }
 
     miniToggle.addEventListener('click', function () {
-        if (!player || !activeVideoId) return;
+        if (!activeSong) return;
+
+        if (!audio.src && activeSong.stream_url) {
+            audio.src = activeSong.stream_url;
+            audio.load();
+        }
+
         if (isPlaying) {
-            player.pauseVideo();
+            audio.pause();
         } else {
-            player.playVideo();
+            const playPromise = audio.play();
+            if (playPromise && typeof playPromise.catch === 'function') {
+                playPromise.catch(function () {
+                    status.textContent = 'Playback blocked by browser. Click Play again.';
+                });
+            }
         }
     });
 
     function makeTile(song) {
+        if (!song || !song.id) {
+            return document.createElement('div');
+        }
+
         const tile = document.createElement('button');
         tile.type = 'button';
         tile.className = `nature-tile music-tile nature-tile--${randomSize()}`;
-        tile.dataset.videoId = song.video_id;
+        tile.dataset.trackId = song.id;
 
         const image = document.createElement('img');
         image.className = 'nature-tile-image';
-        image.src = song.thumbnail || '';
+        image.src = song.artwork || 'https://images.pexels.com/photos/164745/pexels-photo-164745.jpeg?auto=compress&cs=tinysrgb&w=800';
         image.alt = song.title;
         image.loading = 'lazy';
 
@@ -122,7 +157,7 @@
 
         const channel = document.createElement('span');
         channel.className = 'nature-tile-source';
-        channel.textContent = song.channel || 'Unknown channel';
+        channel.textContent = song.artist || 'Unknown artist';
 
         const title = document.createElement('h3');
         title.className = 'nature-tile-title';
@@ -134,7 +169,7 @@
         tile.appendChild(overlay);
         tile.addEventListener('click', function () { playSong(song); });
 
-        if (activeVideoId && song.video_id === activeVideoId) {
+        if (activeTrackId && song.id === activeTrackId) {
             tile.classList.add('music-tile--playing');
         }
         return tile;
@@ -182,13 +217,16 @@
         try {
             const response = await fetch('/api/music/home');
             const data = await response.json();
-            const sections = data.sections || [];
+            const sections = Array.isArray(data.sections) ? data.sections : [];
             if (!sections.length) {
                 status.textContent = 'Music service temporarily unavailable';
                 return;
             }
 
-            sections.forEach((section) => renderSection(homeSections, section.title, section.songs || [], section.query || ""));
+            sections.forEach((section) => {
+                const songs = Array.isArray(section.songs) ? section.songs : [];
+                renderSection(homeSections, section.title, songs, section.query || "");
+            });
             status.textContent = 'Browse by section or search above.';
         } catch (_) {
             status.textContent = 'Music service temporarily unavailable';
@@ -210,7 +248,7 @@
         try {
             const response = await fetch(`/api/music/search?q=${encodeURIComponent(q)}`);
             const data = await response.json();
-            const songs = data.songs || [];
+            const songs = Array.isArray(data.songs) ? data.songs : [];
 
             if (!songs.length) {
                 status.textContent = data.error || 'No results found.';

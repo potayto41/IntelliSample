@@ -1,112 +1,167 @@
-"""Piped-backed music search and normalization helpers."""
+"""Audius-backed music search and normalization helpers."""
 
 from __future__ import annotations
 
-import random
-from urllib.parse import parse_qs, urlparse
+import os
 
 try:
     import httpx
 except Exception:  # pragma: no cover - optional runtime dependency
     httpx = None
 
-from .config.piped import MAX_RESULTS, PIPED_INSTANCES, REQUEST_TIMEOUT
+AUDIOUS_BASE_URL = "https://discoveryprovider.audius.co"
+AUDIOUS_APP_NAME = os.getenv("AUDIOUS_APP_NAME", "sampleforge")
+AUDIOUS_API_KEY = os.getenv("AUDIOUS_API_KEY", "")
+AUDIOUS_BEARER_TOKEN = os.getenv("AUDIOUS_BEARER_TOKEN", "")
+REQUEST_TIMEOUT = 12.0
+MAX_RESULTS = 12
 
 HOME_QUERIES = [
-    ("Trending", "lofi hip hop"),
-    ("Ambient", "ambient music"),
-    ("Nature", "nature sounds"),
-    ("Focus", "deep focus music"),
-    ("Space", "space ambient"),
+    ("Trending", "trending"),
+    ("Lo-fi", "lofi"),
+    ("Ambient", "ambient"),
+    ("Electronic", "electronic"),
+    ("Focus", "focus"),
 ]
 
 FALLBACK_SONGS = [
-    {"video_id": "5qap5aO4i9A", "title": "Lofi Hip Hop Radio", "thumbnail": "https://img.youtube.com/vi/5qap5aO4i9A/hqdefault.jpg", "channel": "Lofi Girl", "duration": 0, "tags": ["lofi", "hip hop", "focus", "trending"]},
-    {"video_id": "DWcJFNfaw9c", "title": "Deep Focus Music", "thumbnail": "https://img.youtube.com/vi/DWcJFNfaw9c/hqdefault.jpg", "channel": "Yellow Brick Cinema", "duration": 0, "tags": ["focus", "study", "ambient"]},
-    {"video_id": "eKFTSSKCzWA", "title": "Relaxing Nature Sounds", "thumbnail": "https://img.youtube.com/vi/eKFTSSKCzWA/hqdefault.jpg", "channel": "Relaxation Film", "duration": 0, "tags": ["nature", "ambient", "sleep"]},
-    {"video_id": "zSWdZVtXT7E", "title": "Interstellar Theme", "thumbnail": "https://img.youtube.com/vi/zSWdZVtXT7E/hqdefault.jpg", "channel": "Hans Zimmer", "duration": 0, "tags": ["space", "ambient"]},
-    {"video_id": "1ZYbU82GVz4", "title": "Nature Relaxation Music", "thumbnail": "https://img.youtube.com/vi/1ZYbU82GVz4/hqdefault.jpg", "channel": "Relax Channel", "duration": 0, "tags": ["nature", "relax"]},
+    {
+        "id": "fallback-1",
+        "title": "SampleForge Chill Stream",
+        "artist": "Fallback Radio",
+        "artwork": "https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=800",
+        "stream_url": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+        "duration": 0,
+        "tags": ["chill", "focus", "fallback"],
+    },
+    {
+        "id": "fallback-2",
+        "title": "Deep Focus Pulse",
+        "artist": "Fallback Radio",
+        "artwork": "https://images.pexels.com/photos/164745/pexels-photo-164745.jpeg?auto=compress&cs=tinysrgb&w=800",
+        "stream_url": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+        "duration": 0,
+        "tags": ["focus", "ambient", "fallback"],
+    },
+    {
+        "id": "fallback-3",
+        "title": "Night Drive Textures",
+        "artist": "Fallback Radio",
+        "artwork": "https://images.pexels.com/photos/270348/pexels-photo-270348.jpeg?auto=compress&cs=tinysrgb&w=800",
+        "stream_url": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
+        "duration": 0,
+        "tags": ["electronic", "night", "fallback"],
+    },
+    {
+        "id": "fallback-4",
+        "title": "Ambient Space Bloom",
+        "artist": "Fallback Radio",
+        "artwork": "https://images.pexels.com/photos/2150/sky-space-dark-galaxy.jpg?auto=compress&cs=tinysrgb&w=800",
+        "stream_url": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
+        "duration": 0,
+        "tags": ["space", "ambient", "fallback"],
+    },
+    {
+        "id": "fallback-5",
+        "title": "Minimal Morning Flow",
+        "artist": "Fallback Radio",
+        "artwork": "https://images.pexels.com/photos/417173/pexels-photo-417173.jpeg?auto=compress&cs=tinysrgb&w=800",
+        "stream_url": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3",
+        "duration": 0,
+        "tags": ["morning", "minimal", "fallback"],
+    },
 ]
 
 
-def _extract_video_id(url: str) -> str:
-    if not url:
-        return ""
+def _request_headers() -> dict[str, str]:
+    headers = {"Accept": "application/json"}
+    if AUDIOUS_API_KEY:
+        headers["x-api-key"] = AUDIOUS_API_KEY
+    if AUDIOUS_BEARER_TOKEN:
+        headers["Authorization"] = f"Bearer {AUDIOUS_BEARER_TOKEN}"
+    return headers
 
-    parsed = urlparse(url)
-    query_video_id = parse_qs(parsed.query).get("v", [""])[0]
-    if query_video_id:
-        return query_video_id
 
-    path = parsed.path.strip("/")
-    if path.startswith("watch/"):
-        return path.split("watch/", 1)[1]
-    if path:
-        return path.split("/")[-1]
+def _resolve_artwork(track: dict) -> str:
+    artwork = track.get("artwork") or {}
+    if isinstance(artwork, dict):
+        return (
+            artwork.get("480x480")
+            or artwork.get("1000x1000")
+            or artwork.get("150x150")
+            or ""
+        )
     return ""
 
 
-async def fetch_from_piped(query: str) -> list[dict]:
-    """Fetch raw results from available Piped instances with failover."""
-    instances = PIPED_INSTANCES[:]
-    random.shuffle(instances)
-
-    if not query.strip() or httpx is None:
-        return []
-
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        for instance in instances:
-            try:
-                response = await client.get(
-                    f"{instance}/api/v1/search",
-                    params={"q": query, "filter": "videos"},
-                )
-                response.raise_for_status()
-                payload = response.json()
-                if isinstance(payload, list):
-                    return payload
-            except Exception:
-                continue
-
-    return []
-
-
-def normalize_piped_response(data: list[dict]) -> dict[str, list[dict]]:
-    """Normalize Piped payload to the UI contract."""
+def normalize_audius_response(data: list[dict]) -> dict[str, list[dict]]:
+    """Normalize Audius payload to the UI contract used by Music Wall."""
     songs: list[dict] = []
 
     for item in data:
-        if item.get("type") != "video":
+        track_id = item.get("id")
+        if not track_id:
             continue
 
-        video_id = _extract_video_id(item.get("url", ""))
-        if not video_id:
-            continue
+        stream_url = ((item.get("stream") or {}).get("url") or "").strip()
+        if not stream_url:
+            stream_url = f"{AUDIOUS_BASE_URL}/v1/tracks/{track_id}/stream?app_name={AUDIOUS_APP_NAME}"
 
         songs.append(
             {
-                "video_id": video_id,
+                "id": str(track_id),
                 "title": item.get("title", "Untitled"),
-                "thumbnail": item.get("thumbnail", ""),
-                "channel": item.get("uploaderName", "Unknown channel"),
-                "duration": item.get("duration", 0),
+                "artist": (item.get("user") or {}).get("name", "Unknown artist"),
+                "artwork": _resolve_artwork(item),
+                "stream_url": stream_url,
+                "duration": int(item.get("duration") or 0),
             }
         )
+
         if len(songs) >= MAX_RESULTS:
             break
 
     return {"songs": songs}
 
 
+async def fetch_from_audius(query: str, limit: int = MAX_RESULTS) -> list[dict]:
+    """Fetch raw track results from Audius search endpoint."""
+    if not query.strip() or httpx is None:
+        return []
+
+    params = {
+        "query": query,
+        "limit": max(1, min(limit, MAX_RESULTS)),
+        "app_name": AUDIOUS_APP_NAME,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, headers=_request_headers()) as client:
+            response = await client.get(f"{AUDIOUS_BASE_URL}/v1/tracks/search", params=params)
+            response.raise_for_status()
+            payload = response.json()
+    except Exception:
+        return []
+
+    data = payload.get("data", []) if isinstance(payload, dict) else []
+    return data if isinstance(data, list) else []
+
+
 def fallback_search(query: str) -> dict[str, list[dict]]:
-    """Local fallback when all Piped instances fail."""
+    """Local fallback when Audius is unavailable or returns no results."""
     q = (query or "").strip().lower()
     if not q:
         return {"songs": FALLBACK_SONGS[:MAX_RESULTS]}
 
     filtered = []
     for song in FALLBACK_SONGS:
-        haystack = " ".join([song.get("title", ""), song.get("channel", ""), " ".join(song.get("tags", []))]).lower()
+        haystack = " ".join(
+            [
+                song.get("title", ""),
+                song.get("artist", ""),
+                " ".join(song.get("tags", [])),
+            ]
+        ).lower()
         if q in haystack:
             filtered.append(song)
 

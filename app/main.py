@@ -13,7 +13,7 @@ from .enrichment import enrich_and_persist
 from .write_safety import add_site_limiter, upload_csv_limiter, validate_csv_upload, get_client_ip
 from .platform_icons import get_platform_icon_svg
 from .news_portal import news_cache, start_news_scheduler, stop_news_scheduler
-from .music_portal import HOME_QUERIES, fallback_search, fetch_from_piped, normalize_piped_response
+from .music_portal import HOME_QUERIES, fallback_search, fetch_from_audius, normalize_audius_response
 import csv
 import io
 import json
@@ -43,7 +43,7 @@ async def startup_event():
     global db_connection_healthy
     try:
         logger.info("Running database schema initialization...")
-        
+
         # Check database connectivity first
         if not check_database_connection():
             logger.warning("Database connection check failed on startup. App will continue but DB operations may fail.")
@@ -51,7 +51,7 @@ async def startup_event():
         else:
             db_connection_healthy = True
             logger.info("Database connection check passed")
-        
+
         # Only create schema automatically in development
         if os.getenv("ENVIRONMENT", "").lower() == "development":
             try:
@@ -91,7 +91,7 @@ async def shutdown_event():
 def _get_search_results(db, q: str, page: int):
     """
     Shared search + pagination logic. Returns dict with sites, platform_icons, page, etc.
-    
+
     Note: Tags are hidden from frontend response (exposed only in API).
     """
     q = (q or "").strip()
@@ -129,7 +129,7 @@ def _get_search_results(db, q: str, page: int):
         pass
 
     platform_icons = [get_platform_icon_svg(s.platform) for s in sites]
-    
+
     # Prepare site data for frontend: include heat stamp fields
     sites_data = []
     for site in sites:
@@ -145,7 +145,7 @@ def _get_search_results(db, q: str, page: int):
             "heat_score": float(site.heat_score) if site.heat_score is not None else 0.0,
         }
         sites_data.append(site_dict)
-    
+
     return {
         "sites": sites_data,
         "platform_icons": platform_icons,
@@ -204,24 +204,24 @@ def suggestions(q: str = "", db: Session = Depends(get_db)):
 def insert_pre_enriched_row(db: Session, row: dict) -> tuple[bool, str]:
     """
     Insert a pre-enriched row directly into the database.
-    
+
     Returns (success, error_message)
     """
     try:
         url = row.get("website_url", "").strip()
-        
+
         # Check if site already exists
         existing = db.query(Site).filter(Site.website_url == url).first()
         if existing:
             return False, "Site already exists"
-        
+
         # Parse JSON fields
         platforms = json.loads(row.get("platforms", "[]")) if row.get("platforms") else []
         industries = json.loads(row.get("industries", "[]")) if row.get("industries") else []
         colors = json.loads(row.get("colors", "{}")) if row.get("colors") else {}
         tag_confidence = json.loads(row.get("tag_confidence", "{}")) if row.get("tag_confidence") else {}
         enrichment_signals = json.loads(row.get("enrichment_signals", "{}")) if row.get("enrichment_signals") else {}
-        
+
         # Parse timestamp
         last_enriched_at = None
         if row.get("last_enriched_at"):
@@ -229,7 +229,7 @@ def insert_pre_enriched_row(db: Session, row: dict) -> tuple[bool, str]:
                 last_enriched_at = datetime.fromisoformat(row["last_enriched_at"].replace('Z', '+00:00'))
             except ValueError:
                 pass
-        
+
         # Create site
         site = Site(
             website_url=url,
@@ -245,11 +245,11 @@ def insert_pre_enriched_row(db: Session, row: dict) -> tuple[bool, str]:
             created_at=datetime_naive.now(),
             updated_at=datetime_naive.now()
         )
-        
+
         db.add(site)
         db.commit()
         return True, ""
-        
+
     except Exception as e:
         db.rollback()
         return False, str(e)
@@ -313,7 +313,7 @@ async def upload_csv(request: Request, file: UploadFile = File(...), db: Session
         # Check if CSV contains pre-enriched data
         enriched_columns = {"platforms", "industries", "colors", "tag_confidence", "enrichment_signals", "last_enriched_at"}
         is_pre_enriched = enriched_columns.issubset(set(reader.fieldnames or []))
-        
+
         if is_pre_enriched:
             logger.info(f"CSV from {ip} contains pre-enriched data - skipping enrichment step")
             yield f"data: {{\"message\": \"Detected pre-enriched CSV - fast import mode\"}}\n\n"
@@ -533,15 +533,15 @@ def nature_news():
 
 @app.get("/music-wall", response_class=HTMLResponse)
 def music_wall_page(request: Request):
-    """Public music portal page with YouTube-backed audio playback."""
+    """Public music portal page with Audius-backed audio playback."""
     return templates.TemplateResponse(request=request, name="music-wall.html", context={"request": request})
 
 
 @app.get("/api/music/search")
 async def music_search(q: str = ""):
-    """Search songs via resilient Piped API failover."""
-    raw = await fetch_from_piped(q)
-    normalized = normalize_piped_response(raw)
+    """Search songs via Audius API with local fallback."""
+    raw = await fetch_from_audius(q)
+    normalized = normalize_audius_response(raw)
     if not normalized["songs"]:
         fallback = fallback_search(q)
         if not fallback["songs"]:
@@ -555,8 +555,8 @@ async def music_home():
     """Return sectioned home feed for Music Wall."""
     sections = []
     for title, query in HOME_QUERIES:
-        raw = await fetch_from_piped(query)
-        normalized = normalize_piped_response(raw)
+        raw = await fetch_from_audius(query)
+        normalized = normalize_audius_response(raw)
         songs = normalized["songs"] if normalized["songs"] else fallback_search(query)["songs"]
         sections.append({"title": title, "query": query, "songs": songs})
     return JSONResponse({"sections": sections})
@@ -566,9 +566,9 @@ async def music_home():
 def health_db():
     """
     Database connectivity health check endpoint.
-    
+
     Attempts SELECT 1 query to verify database connection.
-    
+
     Returns:
         200 OK: {"status": "ok"} if database is reachable
         500 Error: {"status": "error", "detail": "..."} if database is unreachable

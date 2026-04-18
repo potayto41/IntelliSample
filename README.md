@@ -41,7 +41,14 @@ Set in your deployment platform:
 ```bash
 DATABASE_URL=postgresql://user:password@host:port/database?sslmode=require
 ENVIRONMENT=production
+AUDIOUS_API_KEY=your_audius_api_key
+AUDIOUS_BEARER_TOKEN=your_audius_bearer_token
+AUDIOUS_APP_NAME=sampleforge
 ```
+
+Music Wall notes:
+- Keep Audius credentials only in environment variables (Render Dashboard, local .env in development).
+- Do not commit API keys or bearer tokens into repository files.
 
 Optional (auto-detected by database type):
 ```bash
