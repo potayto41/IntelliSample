@@ -537,6 +537,12 @@ def music_wall_page(request: Request):
     return templates.TemplateResponse(request=request, name="music-wall.html", context={"request": request})
 
 
+@app.get("/not-games", response_class=HTMLResponse)
+def not_games_page(request: Request):
+    """Placeholder hub for upcoming lightweight browser games."""
+    return templates.TemplateResponse(request=request, name="not-games.html", context={"request": request})
+
+
 @app.get("/api/music/search")
 async def music_search(q: str = ""):
     """Search songs via Audius API with local fallback."""
