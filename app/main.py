@@ -14,6 +14,7 @@ from .write_safety import add_site_limiter, upload_csv_limiter, validate_csv_upl
 from .platform_icons import get_platform_icon_svg
 from .news_portal import news_cache, start_news_scheduler, stop_news_scheduler
 from .music_portal import HOME_QUERIES, fallback_search, fetch_from_audius, normalize_audius_response
+from .search_intent import analyze_search_query
 import csv
 import io
 import json
@@ -36,6 +37,73 @@ app.mount("/static", StaticFiles(directory="app/Static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 PAGE_SIZE = 10
+
+
+def _merge_semantic_search_results(db: Session, raw_query: str, skip: int, limit: int) -> tuple[list[Site], int]:
+    """Run semantic expansion for homepage search and merge ranked candidates."""
+    analysis = analyze_search_query(raw_query)
+    expanded = analysis.get("expanded_queries", []) if isinstance(analysis, dict) else []
+    expanded = expanded if isinstance(expanded, list) else []
+
+    query_list: list[str] = []
+    seen = set()
+    for candidate in [raw_query, *expanded]:
+        q = (candidate or "").strip()
+        key = q.lower()
+        if not q or key in seen:
+            continue
+        seen.add(key)
+        query_list.append(q)
+        if len(query_list) >= 7:
+            break
+
+    if not query_list:
+        return [], 0
+
+    ranked_scores: dict[int, float] = {}
+    sites_by_id: dict[int, Site] = {}
+
+    for query_index, query_text in enumerate(query_list):
+        candidates, _ = crud.search_sites_paginated(db, query_text, skip=0, limit=max(40, limit * 8))
+        query_weight = 2.2 if query_index == 0 else 1.0
+
+        for rank_index, site in enumerate(candidates):
+            if not site:
+                continue
+            base_rank_score = query_weight / (rank_index + 1)
+            ranked_scores[site.id] = ranked_scores.get(site.id, 0.0) + base_rank_score
+            sites_by_id[site.id] = site
+
+    if not ranked_scores:
+        return [], 0
+
+    filters = analysis.get("filters", {}) if isinstance(analysis, dict) else {}
+    industry_filter = (filters.get("industry") or "").strip().lower() if isinstance(filters, dict) else ""
+    platform_filter = (filters.get("platform") or "").strip().lower() if isinstance(filters, dict) else ""
+
+    filtered_scored_ids = []
+    for site_id, score in ranked_scores.items():
+        site = sites_by_id.get(site_id)
+        if not site:
+            continue
+
+        if industry_filter and industry_filter not in (site.industry or "").lower():
+            continue
+        if platform_filter and platform_filter not in (site.platform or "").lower():
+            continue
+
+        filtered_scored_ids.append((site_id, score))
+
+    if not filtered_scored_ids:
+        filtered_scored_ids = list(ranked_scores.items())
+
+    filtered_scored_ids.sort(key=lambda item: -item[1])
+    ordered_sites = [sites_by_id[site_id] for site_id, _ in filtered_scored_ids if site_id in sites_by_id]
+    total = len(ordered_sites)
+
+    start = max(0, skip)
+    end = start + max(0, limit)
+    return ordered_sites[start:end], total
 
 @app.on_event("startup")
 async def startup_event():
@@ -98,12 +166,12 @@ def _get_search_results(db, q: str, page: int):
     if q:
         raw_page = page if page > 0 else 1
         skip = (raw_page - 1) * PAGE_SIZE
-        sites, total_results = crud.search_sites_paginated(db, q, skip=skip, limit=PAGE_SIZE)
+        sites, total_results = _merge_semantic_search_results(db, q, skip=skip, limit=PAGE_SIZE)
         total_pages = max(1, math.ceil(total_results / PAGE_SIZE)) if total_results > 0 else 1
         if raw_page > total_pages and total_results > 0:
             raw_page = 1
             skip = 0
-            sites, total_results = crud.search_sites_paginated(db, q, skip=skip, limit=PAGE_SIZE)
+            sites, total_results = _merge_semantic_search_results(db, q, skip=skip, limit=PAGE_SIZE)
         current_page = raw_page
         has_previous = current_page > 1
         has_next = current_page < total_pages and total_results > PAGE_SIZE
