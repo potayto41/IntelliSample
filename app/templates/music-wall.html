@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SampleForge | Music Wall Track Discovery and Streaming</title>
+    <meta name="description" content="Discover and stream tracks by mood, genre, and artist on the SampleForge Music Wall powered by Audius.">
+    <meta name="keywords" content="music discovery, audius, stream tracks, music wall, sampleforge">
+    <meta name="robots" content="index, follow">
+    <meta name="author" content="SampleForge">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="SampleForge | Music Wall Track Discovery and Streaming">
+    <meta property="og:description" content="Browse sections or search instantly to discover and stream tracks on Music Wall.">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:site_name" content="SampleForge">
+    <meta property="og:image" content="/static/favicon.svg">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="SampleForge | Music Wall Track Discovery and Streaming">
+    <meta name="twitter:description" content="Browse sections or search instantly to discover and stream tracks on Music Wall.">
+    <meta name="twitter:image" content="/static/favicon.svg">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="canonical" href="{{ request.url }}">
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="manifest" href="/static/site.webmanifest">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="music-wall-body">
+<header class="app-topbar">
+    <div class="app-topbar-inner">
+        <a href="/" class="app-topbar-logo">SampleForge<span style="font-style: italic; font-size: 0.65em; font-weight: 400; opacity: 0.9;">powered by SampleGraph Engine</span></a>
+        <nav class="app-nav">
+            <a href="/" class="app-nav-link">Browse</a>
+            <a href="/add-sites" class="app-nav-link">Add Sites</a>
+            <a href="/nature-wall" class="app-nav-link">Portal</a>
+            <a href="/music-wall" class="app-nav-link app-nav-link-active">Music</a>
+            <a href="/not-games" class="app-nav-link">Not Games</a>
+        </nav>
+    </div>
+</header>
+
+<main class="main-content">
+    <div class="container container--wide music-wall-container">
+        <header class="page-header">
+            <h1 class="page-title">Music Wall</h1>
+            <p class="page-subtitle">Discover music by section or search instantly.</p>
+        </header>
+
+        <section class="section-card card">
+            <div class="music-search-row">
+                <input id="music-search" class="music-search" type="search" placeholder="Search any song, artist, or vibe..." aria-label="Search music">
+            </div>
+            <div id="music-wall-status" class="nature-wall-status">Loading music…</div>
+            <div id="music-search-results" class="music-section" style="display:none;"></div>
+            <div id="music-home-sections"></div>
+        </section>
+    </div>
+</main>
+
+<audio id="music-audio-player" preload="none" style="display:none;"></audio>
+
+<div class="music-mini-player">
+    <div class="music-mini-player__title" id="mini-player-title">No track selected</div>
+    <div class="music-mini-player__controls">
+        <button id="mini-player-prev" class="music-control-btn" type="button" aria-label="Previous track">Prev</button>
+        <button id="mini-player-toggle" class="btn-primary" type="button">Play</button>
+        <button id="mini-player-next" class="music-control-btn" type="button" aria-label="Next track">Next</button>
+        <button id="mini-player-mute" class="music-control-btn" type="button" aria-label="Mute audio">Mute</button>
+        <label class="music-volume-wrap" for="mini-player-volume">
+            Volume
+            <input id="mini-player-volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume">
+        </label>
+    </div>
+    <div class="music-mini-player__timeline">
+        <span id="mini-player-time-current">0:00</span>
+        <input id="mini-player-scrub" type="range" min="0" max="100" step="0.1" value="0" aria-label="Seek track">
+        <span id="mini-player-time-duration">0:00</span>
+    </div>
+</div>
+
+<script>
+    let isPlaying = false;
+    let activeTrackId = null;
+    let activeSong = null;
+    let activeTrackIndex = -1;
+    let currentPlayableSongs = [];
+    let isScrubbing = false;
+    let debounceTimer = null;
+
+    const audio = document.getElementById('music-audio-player');
+    const searchInput = document.getElementById('music-search');
+    const status = document.getElementById('music-wall-status');
+    const homeSections = document.getElementById('music-home-sections');
+    const searchResults = document.getElementById('music-search-results');
+    const miniTitle = document.getElementById('mini-player-title');
+    const miniPrev = document.getElementById('mini-player-prev');
+    const miniToggle = document.getElementById('mini-player-toggle');
+    const miniNext = document.getElementById('mini-player-next');
+    const miniMute = document.getElementById('mini-player-mute');
+    const miniVolume = document.getElementById('mini-player-volume');
+    const miniScrub = document.getElementById('mini-player-scrub');
+    const miniCurrentTime = document.getElementById('mini-player-time-current');
+    const miniDuration = document.getElementById('mini-player-time-duration');
+    const sizes = ['small', 'medium', 'large'];
+
+    function randomSize() {
+        return sizes[Math.floor(Math.random() * sizes.length)];
+    }
+
+    function formatDuration(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) {
+            return '0:00';
+        }
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60).toString().padStart(2, '0');
+        return `${mins}:${secs}`;
+    }
+
+    function updateTransportButtons() {
+        const hasTrack = Boolean(activeSong);
+        const hasPrev = hasTrack && activeTrackIndex > 0;
+        const hasNext = hasTrack && activeTrackIndex >= 0 && activeTrackIndex < currentPlayableSongs.length - 1;
+
+        miniToggle.disabled = !hasTrack;
+        miniPrev.disabled = !hasPrev;
+        miniNext.disabled = !hasNext;
+    }
+
+    function syncActiveTrackIndex() {
+        if (!activeTrackId) {
+            activeTrackIndex = -1;
+            updateTransportButtons();
+            return;
+        }
+        activeTrackIndex = currentPlayableSongs.findIndex((song) => song && song.id === activeTrackId);
+        updateTransportButtons();
+    }
+
+    function setPlayableSongs(songs) {
+        currentPlayableSongs = (songs || []).filter((song) => song && song.id && song.stream_url);
+        syncActiveTrackIndex();
+    }
+
+    function updateTimelineUI() {
+        const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+        const current = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+        miniCurrentTime.textContent = formatDuration(current);
+        miniDuration.textContent = formatDuration(duration);
+
+        if (duration <= 0) {
+            miniScrub.value = '0';
+            return;
+        }
+
+        if (!isScrubbing) {
+            miniScrub.value = String((current / duration) * 100);
+        }
+    }
+
+    audio.addEventListener('play', function () {
+        isPlaying = true;
+        miniToggle.textContent = 'Pause';
+        updateActiveTiles();
+    });
+
+    audio.addEventListener('pause', function () {
+        isPlaying = false;
+        miniToggle.textContent = 'Play';
+    });
+
+    audio.addEventListener('ended', function () {
+        isPlaying = false;
+        miniToggle.textContent = 'Play';
+        if (activeTrackIndex >= 0 && activeTrackIndex < currentPlayableSongs.length - 1) {
+            playSong(currentPlayableSongs[activeTrackIndex + 1]);
+        }
+    });
+
+    audio.addEventListener('error', function () {
+        isPlaying = false;
+        miniToggle.textContent = 'Play';
+        status.textContent = 'Could not stream this track. Try another one.';
+    });
+
+    audio.addEventListener('loadedmetadata', updateTimelineUI);
+    audio.addEventListener('durationchange', updateTimelineUI);
+    audio.addEventListener('timeupdate', updateTimelineUI);
+
+    miniScrub.addEventListener('input', function () {
+        isScrubbing = true;
+        const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+        if (duration <= 0) {
+            return;
+        }
+        const previewTime = (Number(miniScrub.value) / 100) * duration;
+        miniCurrentTime.textContent = formatDuration(previewTime);
+    });
+
+    miniScrub.addEventListener('change', function () {
+        const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+        if (duration > 0) {
+            audio.currentTime = (Number(miniScrub.value) / 100) * duration;
+        }
+        isScrubbing = false;
+        updateTimelineUI();
+    });
+
+    miniVolume.addEventListener('input', function () {
+        const nextVolume = Math.min(1, Math.max(0, Number(miniVolume.value)));
+        audio.volume = nextVolume;
+        if (nextVolume > 0 && audio.muted) {
+            audio.muted = false;
+        }
+        miniMute.textContent = audio.muted || nextVolume === 0 ? 'Unmute' : 'Mute';
+    });
+
+    miniMute.addEventListener('click', function () {
+        audio.muted = !audio.muted;
+        miniMute.textContent = audio.muted ? 'Unmute' : 'Mute';
+    });
+
+    function playSong(song) {
+        if (!song || !song.id || !song.stream_url) return;
+
+        const isSameTrack = activeTrackId && activeTrackId === song.id;
+        activeSong = song;
+        activeTrackId = song.id;
+        syncActiveTrackIndex();
+        miniTitle.textContent = `${song.title} - ${song.artist || 'Unknown artist'}`;
+
+        if (!isSameTrack) {
+            audio.src = song.stream_url;
+            audio.load();
+            miniCurrentTime.textContent = '0:00';
+            miniDuration.textContent = formatDuration(song.duration || 0);
+            miniScrub.value = '0';
+        }
+
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(function () {
+                status.textContent = 'Playback blocked by browser. Click Play again.';
+            });
+        }
+
+        updateActiveTiles();
+    }
+
+    function updateActiveTiles() {
+        document.querySelectorAll('.music-tile--playing').forEach((tile) => tile.classList.remove('music-tile--playing'));
+        if (!activeTrackId) return;
+        document.querySelectorAll(`[data-track-id="${activeTrackId}"]`).forEach((tile) => tile.classList.add('music-tile--playing'));
+    }
+
+    miniToggle.addEventListener('click', function () {
+        if (!activeSong) return;
+
+        if (!audio.src && activeSong.stream_url) {
+            audio.src = activeSong.stream_url;
+            audio.load();
+        }
+
+        if (isPlaying) {
+            audio.pause();
+        } else {
+            const playPromise = audio.play();
+            if (playPromise && typeof playPromise.catch === 'function') {
+                playPromise.catch(function () {
+                    status.textContent = 'Playback blocked by browser. Click Play again.';
+                });
+            }
+        }
+    });
+
+    miniPrev.addEventListener('click', function () {
+        if (activeTrackIndex > 0) {
+            playSong(currentPlayableSongs[activeTrackIndex - 1]);
+        }
+    });
+
+    miniNext.addEventListener('click', function () {
+        if (activeTrackIndex >= 0 && activeTrackIndex < currentPlayableSongs.length - 1) {
+            playSong(currentPlayableSongs[activeTrackIndex + 1]);
+        }
+    });
+
+    function makeTile(song) {
+        if (!song || !song.id) {
+            return document.createElement('div');
+        }
+
+        const tile = document.createElement('button');
+        tile.type = 'button';
+        tile.className = `nature-tile music-tile nature-tile--${randomSize()}`;
+        tile.dataset.trackId = song.id;
+
+        const image = document.createElement('img');
+        image.className = 'nature-tile-image';
+        image.src = song.artwork || 'https://images.pexels.com/photos/164745/pexels-photo-164745.jpeg?auto=compress&cs=tinysrgb&w=800';
+        image.alt = song.title;
+        image.loading = 'lazy';
+
+        const overlay = document.createElement('div');
+        overlay.className = 'nature-tile-overlay';
+
+        const channel = document.createElement('span');
+        channel.className = 'nature-tile-source';
+        channel.textContent = song.artist || 'Unknown artist';
+
+        const title = document.createElement('h3');
+        title.className = 'nature-tile-title';
+        title.textContent = song.title || 'Untitled';
+
+        overlay.appendChild(channel);
+        overlay.appendChild(title);
+        tile.appendChild(image);
+        tile.appendChild(overlay);
+        tile.addEventListener('click', function () { playSong(song); });
+
+        if (activeTrackId && song.id === activeTrackId) {
+            tile.classList.add('music-tile--playing');
+        }
+        return tile;
+    }
+
+    function renderSection(target, title, songs, query) {
+        const wrapper = document.createElement('section');
+        wrapper.className = 'music-section';
+
+        const heading = document.createElement('button');
+        heading.type = 'button';
+        heading.className = 'music-section-title music-section-title-button';
+        heading.textContent = title;
+        heading.addEventListener('click', function () { if (query) { searchInput.value = query; runSearch(query); } });
+
+        const row = document.createElement('div');
+        row.className = 'music-row-scroll';
+
+        songs.forEach((song) => row.appendChild(makeTile(song)));
+
+        const titleList = document.createElement('ul');
+        titleList.className = 'music-inline-title-list';
+        songs.forEach((song) => {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'music-inline-title-btn';
+            btn.textContent = song.title || 'Untitled';
+            btn.addEventListener('click', function () { playSong(song); });
+            li.appendChild(btn);
+            titleList.appendChild(li);
+        });
+
+        wrapper.appendChild(heading);
+        wrapper.appendChild(row);
+        wrapper.appendChild(titleList);
+        target.appendChild(wrapper);
+    }
+
+    async function loadHome() {
+        status.textContent = 'Loading sections...';
+        searchResults.style.display = 'none';
+        homeSections.innerHTML = '';
+
+        try {
+            const response = await fetch('/api/music/home');
+            const data = await response.json();
+            const sections = Array.isArray(data.sections) ? data.sections : [];
+            if (!sections.length) {
+                status.textContent = 'Music service temporarily unavailable';
+                return;
+            }
+
+            sections.forEach((section) => {
+                const songs = Array.isArray(section.songs) ? section.songs : [];
+                renderSection(homeSections, section.title, songs, section.query || "");
+            });
+
+            const allSongs = sections.flatMap((section) => Array.isArray(section.songs) ? section.songs : []);
+            setPlayableSongs(allSongs);
+            status.textContent = 'Browse by section or search above.';
+        } catch (_) {
+            status.textContent = 'Music service temporarily unavailable';
+        }
+    }
+
+    async function runSearch(query) {
+        const q = query.trim();
+        if (!q) {
+            await loadHome();
+            return;
+        }
+
+        status.textContent = `Searching for "${q}"...`;
+        searchResults.style.display = 'block';
+        searchResults.innerHTML = '';
+        homeSections.innerHTML = '';
+
+        try {
+            const response = await fetch(`/api/music/search?q=${encodeURIComponent(q)}`);
+            const data = await response.json();
+            const songs = Array.isArray(data.songs) ? data.songs : [];
+
+            if (!songs.length) {
+                status.textContent = data.error || 'No results found.';
+                setPlayableSongs([]);
+                return;
+            }
+
+            renderSection(searchResults, `Results for "${q}"`, songs, q);
+            setPlayableSongs(songs);
+            status.textContent = `Found ${songs.length} result(s).`;
+        } catch (_) {
+            status.textContent = 'Music service temporarily unavailable';
+        }
+    }
+
+    searchInput.addEventListener('input', function () {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(function () {
+            runSearch(searchInput.value || '');
+        }, 300);
+    });
+
+    updateTransportButtons();
+    miniDuration.textContent = '0:00';
+    miniCurrentTime.textContent = '0:00';
+    audio.volume = Number(miniVolume.value);
+
+    loadHome();
+</script>
+</body>
+</html>

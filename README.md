@@ -41,7 +41,20 @@ Set in your deployment platform:
 ```bash
 DATABASE_URL=postgresql://user:password@host:port/database?sslmode=require
 ENVIRONMENT=production
+AUDIOUS_API_KEY=your_audius_api_key
+AUDIOUS_BEARER_TOKEN=your_audius_bearer_token
+AUDIOUS_APP_NAME=sampleforge
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-1.5-flash
 ```
+
+Music Wall notes:
+- Keep Audius credentials only in environment variables (Render Dashboard, local .env in development).
+- Do not commit API keys or bearer tokens into repository files.
+
+Homepage search semantic notes:
+- `GEMINI_API_KEY` enables AI query understanding for the first page search only (`/` and `/search`).
+- If `GEMINI_API_KEY` is missing or unavailable, the app falls back to a local heuristic query expansion.
 
 Optional (auto-detected by database type):
 ```bash

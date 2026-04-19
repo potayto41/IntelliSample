@@ -3,7 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SampleForge — Add Sites</title>
+    <title>SampleForge | Add Websites to Your Catalog</title>
+    <meta name="description" content="Add single websites or bulk upload CSV files to grow your SampleForge marketing site catalog.">
+    <meta name="keywords" content="add websites, csv upload, website catalog, marketing sites, sampleforge">
+    <meta name="robots" content="index, follow">
+    <meta name="author" content="SampleForge">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="SampleForge | Add Websites to Your Catalog">
+    <meta property="og:description" content="Import and manage website records with manual entry and CSV upload in SampleForge.">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:site_name" content="SampleForge">
+    <meta property="og:image" content="/static/favicon.svg">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="SampleForge | Add Websites to Your Catalog">
+    <meta name="twitter:description" content="Import and manage website records with manual entry and CSV upload in SampleForge.">
+    <meta name="twitter:image" content="/static/favicon.svg">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="canonical" href="{{ request.url }}">
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="manifest" href="/static/site.webmanifest">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -13,6 +31,9 @@
             <nav class="app-nav">
                 <a href="/" class="app-nav-link">Browse</a>
                 <a href="/add-sites" class="app-nav-link app-nav-link-active">Add Sites</a>
+                <a href="/nature-wall" class="app-nav-link">Portal</a>
+                <a href="/music-wall" class="app-nav-link">Music</a>
+                <a href="/not-games" class="app-nav-link">Not Games</a>
             </nav>
         </div>
     </header>
@@ -28,7 +49,7 @@
                 </p>
             </header>
 
-            <!-- Manual add form (UI only — no API wiring) -->
+            <!-- Manual add form -->
             <section class="section-card card">
                 <div class="card-header">
                     <h2>Add site manually</h2>
@@ -36,6 +57,7 @@
                         Quickly add a single site to your catalog.
                     </p>
                 </div>
+                <div id="add-site-result" aria-live="polite"></div>
                 <form class="add-form" action="#" method="post" onsubmit="return false;">
                     <div class="add-form-grid">
                         <label class="field">
@@ -55,8 +77,18 @@
                             <input type="text" name="tags" placeholder="hero video, dark mode, pricing table (comma‑separated)">
                         </label>
                     </div>
-                    <button type="submit" class="btn-primary" disabled>Add site (coming soon)</button>
+                    <button type="submit" class="btn-primary">Add site</button>
                 </form>
+            </section>
+
+            <section class="section-card card">
+                <div class="card-header">
+                    <h2>Recently added sites</h2>
+                    <p class="card-subtitle">This list auto-refreshes after a successful add.</p>
+                </div>
+                <ul id="recent-sites-list" class="recent-sites-list">
+                    <li class="recent-sites-empty">No sites yet.</li>
+                </ul>
             </section>
 
             <!-- Bulk upload (UI only — no API wiring) -->

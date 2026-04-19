@@ -12,6 +12,9 @@ from . import crud
 from .enrichment import enrich_and_persist
 from .write_safety import add_site_limiter, upload_csv_limiter, validate_csv_upload, get_client_ip
 from .platform_icons import get_platform_icon_svg
+from .news_portal import news_cache, start_news_scheduler, stop_news_scheduler
+from .music_portal import HOME_QUERIES, fallback_search, fetch_from_audius, normalize_audius_response
+from .search_intent import analyze_search_query
 import csv
 import io
 import json
@@ -35,13 +38,80 @@ templates = Jinja2Templates(directory="app/templates")
 
 PAGE_SIZE = 10
 
+
+def _merge_semantic_search_results(db: Session, raw_query: str, skip: int, limit: int) -> tuple[list[Site], int]:
+    """Run semantic expansion for homepage search and merge ranked candidates."""
+    analysis = analyze_search_query(raw_query)
+    expanded = analysis.get("expanded_queries", []) if isinstance(analysis, dict) else []
+    expanded = expanded if isinstance(expanded, list) else []
+
+    query_list: list[str] = []
+    seen = set()
+    for candidate in [raw_query, *expanded]:
+        q = (candidate or "").strip()
+        key = q.lower()
+        if not q or key in seen:
+            continue
+        seen.add(key)
+        query_list.append(q)
+        if len(query_list) >= 7:
+            break
+
+    if not query_list:
+        return [], 0
+
+    ranked_scores: dict[int, float] = {}
+    sites_by_id: dict[int, Site] = {}
+
+    for query_index, query_text in enumerate(query_list):
+        candidates, _ = crud.search_sites_paginated(db, query_text, skip=0, limit=max(40, limit * 8))
+        query_weight = 2.2 if query_index == 0 else 1.0
+
+        for rank_index, site in enumerate(candidates):
+            if not site:
+                continue
+            base_rank_score = query_weight / (rank_index + 1)
+            ranked_scores[site.id] = ranked_scores.get(site.id, 0.0) + base_rank_score
+            sites_by_id[site.id] = site
+
+    if not ranked_scores:
+        return [], 0
+
+    filters = analysis.get("filters", {}) if isinstance(analysis, dict) else {}
+    industry_filter = (filters.get("industry") or "").strip().lower() if isinstance(filters, dict) else ""
+    platform_filter = (filters.get("platform") or "").strip().lower() if isinstance(filters, dict) else ""
+
+    filtered_scored_ids = []
+    for site_id, score in ranked_scores.items():
+        site = sites_by_id.get(site_id)
+        if not site:
+            continue
+
+        if industry_filter and industry_filter not in (site.industry or "").lower():
+            continue
+        if platform_filter and platform_filter not in (site.platform or "").lower():
+            continue
+
+        filtered_scored_ids.append((site_id, score))
+
+    if not filtered_scored_ids:
+        filtered_scored_ids = list(ranked_scores.items())
+
+    filtered_scored_ids.sort(key=lambda item: -item[1])
+    ordered_sites = [sites_by_id[site_id] for site_id, _ in filtered_scored_ids if site_id in sites_by_id]
+    total = len(ordered_sites)
+
+    start = max(0, skip)
+    end = start + max(0, limit)
+    return ordered_sites[start:end], total
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize database schema and ensure enrichment columns exist."""
     global db_connection_healthy
     try:
         logger.info("Running database schema initialization...")
-        
+
         # Check database connectivity first
         if not check_database_connection():
             logger.warning("Database connection check failed on startup. App will continue but DB operations may fail.")
@@ -49,7 +119,7 @@ async def startup_event():
         else:
             db_connection_healthy = True
             logger.info("Database connection check passed")
-        
+
         # Only create schema automatically in development
         if os.getenv("ENVIRONMENT", "").lower() == "development":
             try:
@@ -75,23 +145,33 @@ async def startup_event():
         logger.error(f"Database schema initialization failed: {e}")
         # Don't crash the app, but log the error
         pass
+    finally:
+        # Nature Wall is in-memory and independent from DB; always start scheduler.
+        start_news_scheduler()
+
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop background schedulers gracefully."""
+    stop_news_scheduler()
 
 def _get_search_results(db, q: str, page: int):
     """
     Shared search + pagination logic. Returns dict with sites, platform_icons, page, etc.
-    
+
     Note: Tags are hidden from frontend response (exposed only in API).
     """
     q = (q or "").strip()
     if q:
         raw_page = page if page > 0 else 1
         skip = (raw_page - 1) * PAGE_SIZE
-        sites, total_results = crud.search_sites_paginated(db, q, skip=skip, limit=PAGE_SIZE)
+        sites, total_results = _merge_semantic_search_results(db, q, skip=skip, limit=PAGE_SIZE)
         total_pages = max(1, math.ceil(total_results / PAGE_SIZE)) if total_results > 0 else 1
         if raw_page > total_pages and total_results > 0:
             raw_page = 1
             skip = 0
-            sites, total_results = crud.search_sites_paginated(db, q, skip=skip, limit=PAGE_SIZE)
+            sites, total_results = _merge_semantic_search_results(db, q, skip=skip, limit=PAGE_SIZE)
         current_page = raw_page
         has_previous = current_page > 1
         has_next = current_page < total_pages and total_results > PAGE_SIZE
@@ -117,7 +197,7 @@ def _get_search_results(db, q: str, page: int):
         pass
 
     platform_icons = [get_platform_icon_svg(s.platform) for s in sites]
-    
+
     # Prepare site data for frontend: include heat stamp fields
     sites_data = []
     for site in sites:
@@ -133,7 +213,7 @@ def _get_search_results(db, q: str, page: int):
             "heat_score": float(site.heat_score) if site.heat_score is not None else 0.0,
         }
         sites_data.append(site_dict)
-    
+
     return {
         "sites": sites_data,
         "platform_icons": platform_icons,
@@ -152,15 +232,16 @@ def _get_search_results(db, q: str, page: int):
 def index(request: Request, q: str = "", page: int = 1, db: Session = Depends(get_db)):
     ctx = _get_search_results(db, q, page)
     return templates.TemplateResponse(
-        "index.html",
-        {"request": request, **ctx},
+        request=request,
+        name="index.html",
+        context={"request": request, **ctx},
     )
 
 
 @app.get("/add-sites", response_class=HTMLResponse)
 def add_sites_page(request: Request):
     """Add Sites page (UI only). No upload logic wired."""
-    return templates.TemplateResponse("add-sites.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="add-sites.html", context={"request": request})
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -168,8 +249,9 @@ def search(request: Request, q: str = "", page: int = 1, db: Session = Depends(g
     """Returns only the results section HTML (partial) for AJAX replacement."""
     ctx = _get_search_results(db, q, page)
     return templates.TemplateResponse(
-        "results.html",
-        {"request": request, **ctx},
+        request=request,
+        name="results.html",
+        context={"request": request, **ctx},
     )
 
 
@@ -190,24 +272,24 @@ def suggestions(q: str = "", db: Session = Depends(get_db)):
 def insert_pre_enriched_row(db: Session, row: dict) -> tuple[bool, str]:
     """
     Insert a pre-enriched row directly into the database.
-    
+
     Returns (success, error_message)
     """
     try:
         url = row.get("website_url", "").strip()
-        
+
         # Check if site already exists
         existing = db.query(Site).filter(Site.website_url == url).first()
         if existing:
             return False, "Site already exists"
-        
+
         # Parse JSON fields
         platforms = json.loads(row.get("platforms", "[]")) if row.get("platforms") else []
         industries = json.loads(row.get("industries", "[]")) if row.get("industries") else []
         colors = json.loads(row.get("colors", "{}")) if row.get("colors") else {}
         tag_confidence = json.loads(row.get("tag_confidence", "{}")) if row.get("tag_confidence") else {}
         enrichment_signals = json.loads(row.get("enrichment_signals", "{}")) if row.get("enrichment_signals") else {}
-        
+
         # Parse timestamp
         last_enriched_at = None
         if row.get("last_enriched_at"):
@@ -215,7 +297,7 @@ def insert_pre_enriched_row(db: Session, row: dict) -> tuple[bool, str]:
                 last_enriched_at = datetime.fromisoformat(row["last_enriched_at"].replace('Z', '+00:00'))
             except ValueError:
                 pass
-        
+
         # Create site
         site = Site(
             website_url=url,
@@ -231,11 +313,11 @@ def insert_pre_enriched_row(db: Session, row: dict) -> tuple[bool, str]:
             created_at=datetime_naive.now(),
             updated_at=datetime_naive.now()
         )
-        
+
         db.add(site)
         db.commit()
         return True, ""
-        
+
     except Exception as e:
         db.rollback()
         return False, str(e)
@@ -299,7 +381,7 @@ async def upload_csv(request: Request, file: UploadFile = File(...), db: Session
         # Check if CSV contains pre-enriched data
         enriched_columns = {"platforms", "industries", "colors", "tag_confidence", "enrichment_signals", "last_enriched_at"}
         is_pre_enriched = enriched_columns.issubset(set(reader.fieldnames or []))
-        
+
         if is_pre_enriched:
             logger.info(f"CSV from {ip} contains pre-enriched data - skipping enrichment step")
             yield f"data: {{\"message\": \"Detected pre-enriched CSV - fast import mode\"}}\n\n"
@@ -429,6 +511,18 @@ async def add_site(request: Request, website_url: str = Form(...), db: Session =
             status_code=400,
         )
 
+    # Avoid re-enriching rows that are already present; this gives users clear feedback
+    # and prevents accidental updates from duplicate submissions.
+    existing_site = db.query(Site).filter(Site.website_url == url).first()
+    if existing_site:
+        return JSONResponse(
+            {
+                "status": "error",
+                "error": "Site already exists.",
+            },
+            status_code=409,
+        )
+
     try:
         success, error_msg, result = enrich_and_persist(db, url)
         if success and result:
@@ -436,7 +530,7 @@ async def add_site(request: Request, website_url: str = Form(...), db: Session =
             return JSONResponse(
                 {
                     "status": "success",
-                    "message": f"Site {url} added successfully",
+                    "message": "Site added successfully.",
                     "site": result.to_dict(),
                 },
                 status_code=201,
@@ -462,13 +556,93 @@ async def add_site(request: Request, website_url: str = Form(...), db: Session =
     # DB session closed by dependency
 
 
+@app.get("/api/sites/recent")
+def recent_sites(limit: int = 10, db: Session = Depends(get_db)):
+    """
+    Return recently created sites for lightweight UI refreshes.
+
+    The Add Site page uses this endpoint to reflect inserts immediately
+    after enrichment and DB persistence complete.
+    """
+    clamped_limit = max(1, min(limit, 50))
+    sites = (
+        db.query(Site)
+        .order_by(Site.id.desc())
+        .limit(clamped_limit)
+        .all()
+    )
+
+    return JSONResponse(
+        {
+            "sites": [
+                {
+                    "id": site.id,
+                    "website_url": site.website_url,
+                    "platform": site.platform,
+                    "industry": site.industry,
+                }
+                for site in sites
+            ]
+        }
+    )
+
+
+@app.get("/nature-wall", response_class=HTMLResponse)
+def nature_wall_page(request: Request):
+    """Public visual news portal page."""
+    return templates.TemplateResponse(request=request, name="nature-wall.html", context={"request": request})
+
+
+@app.get("/api/nature-news")
+def nature_news():
+    """Return cached nature/science articles for Nature Wall."""
+    return JSONResponse({"articles": news_cache})
+
+
+@app.get("/music-wall", response_class=HTMLResponse)
+def music_wall_page(request: Request):
+    """Public music portal page with Audius-backed audio playback."""
+    return templates.TemplateResponse(request=request, name="music-wall.html", context={"request": request})
+
+
+@app.get("/not-games", response_class=HTMLResponse)
+def not_games_page(request: Request):
+    """Placeholder hub for upcoming lightweight browser games."""
+    return templates.TemplateResponse(request=request, name="not-games.html", context={"request": request})
+
+
+@app.get("/api/music/search")
+async def music_search(q: str = ""):
+    """Search songs via Audius API with local fallback."""
+    raw = await fetch_from_audius(q)
+    normalized = normalize_audius_response(raw)
+    if not normalized["songs"]:
+        fallback = fallback_search(q)
+        if not fallback["songs"]:
+            return JSONResponse({"songs": [], "error": "Music service temporarily unavailable"})
+        return JSONResponse({**fallback, "fallback": True})
+    return JSONResponse(normalized)
+
+
+@app.get("/api/music/home")
+async def music_home():
+    """Return sectioned home feed for Music Wall."""
+    sections = []
+    for title, query in HOME_QUERIES:
+        raw = await fetch_from_audius(query)
+        normalized = normalize_audius_response(raw)
+        songs = normalized["songs"] if normalized["songs"] else fallback_search(query)["songs"]
+        sections.append({"title": title, "query": query, "songs": songs})
+    return JSONResponse({"sections": sections})
+
+
 @app.get("/health/db")
 def health_db():
     """
     Database connectivity health check endpoint.
-    
+
     Attempts SELECT 1 query to verify database connection.
-    
+
     Returns:
         200 OK: {"status": "ok"} if database is reachable
         500 Error: {"status": "error", "detail": "..."} if database is unreachable
